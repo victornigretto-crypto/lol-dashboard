@@ -73,6 +73,31 @@ export default function Home() {
     );
   };
 
+  const getResultClass = (result: string) => {
+    if (String(result).toLowerCase().startsWith("v")) return "bg-green-600 text-white";
+    return "bg-red-600 text-white";
+  };
+
+  const getCsClass = (cs: number) => {
+    if (cs < 100) return "bg-red-400 text-white";
+    if (cs < 120) return "bg-red-600 text-white";
+    if (cs < 140) return "bg-yellow-500 text-black";
+    if (cs < 160) return "bg-green-200 text-slate-900";
+    if (cs < 180) return "bg-green-400 text-white";
+    return "bg-green-600 text-white";
+  };
+
+  const getDeathsClass = (d: number) => {
+    if (d === 0) return "bg-green-600 text-white";
+    if (d > 2) return "bg-red-300 text-black";
+    if (d > 1.5) return "bg-red-600 text-white";
+    if (d > 1.25) return "bg-red-400 text-white";
+    if (d >= 1 && d <= 1.25) return "bg-yellow-500 text-black";
+    if (d >= 0.5 && d < 1) return "bg-green-200 text-slate-900";
+    if (d > 0 && d < 0.5) return "bg-green-400 text-white";
+    return "bg-green-600 text-white";
+  };
+
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100 p-4">
       <section className="mx-auto max-w-full">
@@ -106,9 +131,17 @@ export default function Home() {
                   <td className="w-16 px-2 py-3 text-slate-100">{game.lane}</td>
                   <td className="w-28 px-2 py-3 text-slate-100">{game.champion}</td>
                   <td className="w-28 px-2 py-3 text-slate-100">{game.matchup}</td>
-                  <td className="w-8 px-2 py-3 text-slate-100 text-center">{String(game.result).charAt(0).toUpperCase()}</td>
-                  <td className="w-20 px-2 py-3 text-slate-100">{game.cs20}</td>
-                  <td className="w-20 px-2 py-3 text-slate-100 text-center">{game.deaths10}</td>
+                  <td className="w-8 px-2 py-3 text-center">
+                    <span className={getResultClass(game.result) + " inline-block rounded px-1 py-0.5 text-xs"}>
+                      {String(game.result).charAt(0).toUpperCase()}
+                    </span>
+                  </td>
+                  <td className="w-20 px-2 py-3 text-center">
+                    <span className={getCsClass(game.cs20) + " inline-block rounded px-2 py-0.5 text-xs"}>{game.cs20}</span>
+                  </td>
+                  <td className="w-20 px-2 py-3 text-center">
+                    <span className={getDeathsClass(game.deaths10) + " inline-block rounded px-2 py-0.5 text-xs"}>{game.deaths10}</span>
+                  </td>
                   <td className="w-48 px-2 py-3 align-top">
                     {game.errorLane.map((text, index) => (
                       <textarea
