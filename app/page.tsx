@@ -74,81 +74,81 @@ export default function Home() {
   };
 
   return (
-    <main className="min-h-screen bg-slate-950 text-slate-100 p-6">
-      <section className="mx-auto max-w-6xl">
-        <header className="mb-6 rounded-3xl border border-slate-700 bg-slate-900/90 p-6 shadow-xl shadow-slate-950/20">
+    <main className="min-h-screen bg-slate-950 text-slate-100 p-4">
+      <section className="mx-auto max-w-full">
+        <header className="mb-4 rounded-2xl border border-slate-700 bg-slate-900/90 p-4 shadow-sm">
           <p className="text-sm uppercase tracking-[0.3em] text-slate-400">Dashboard League of Legends</p>
           <h1 className="mt-4 text-4xl font-semibold">Suivi de mes games</h1>
           <p className="mt-2 max-w-2xl text-slate-400">Première version : données codées en dur pour apprendre React et Next.js.</p>
         </header>
 
-        <div className="overflow-x-auto rounded-3xl border border-slate-700 bg-slate-900/80 p-4">
-          <table className="min-w-full border-collapse text-left text-sm">
+        <div className="overflow-x-auto rounded-2xl border border-slate-700 bg-slate-900/80 p-2">
+          <table className="min-w-full table-fixed border-collapse text-left text-xs">
             <thead>
               <tr className="border-b border-slate-700 text-slate-300 text-xs">
-                <th className="w-10 px-2 py-3 text-center">Game</th>
-                <th className="w-20 px-2 py-3">Lane</th>
-                <th className="px-3 py-3">Champion</th>
-                <th className="px-3 py-3">Matchup</th>
-                <th className="w-16 px-2 py-3">V/D</th>
-                <th className="w-20 px-2 py-3">Csà20mins</th>
-                <th className="w-24 px-2 py-3"><div className="whitespace-normal">Mort par<br/>10mins</div></th>
-                <th className="px-3 py-3">Erreur en phase de Lane</th>
-                <th className="px-3 py-3">Erreur de macro</th>
-                <th className="px-3 py-3">Erreur en fight</th>
-                <th className="min-w-[20rem] px-3 py-3">Résumé</th>
+                <th className="w-8 px-2 py-2 text-center">Game</th>
+                <th className="w-16 px-2 py-2">Lane</th>
+                <th className="w-28 px-2 py-2">Champion</th>
+                <th className="w-28 px-2 py-2">Matchup</th>
+                <th className="w-8 px-2 py-2 text-center">V/D</th>
+                <th className="w-20 px-2 py-2">Csà20mins</th>
+                <th className="w-20 px-2 py-2 text-center"><div className="whitespace-normal">Mort<br/>10m</div></th>
+                <th className="w-48 px-2 py-2">Erreur Lane</th>
+                <th className="w-48 px-2 py-2">Erreur Macro</th>
+                <th className="w-48 px-2 py-2">Erreur Fight</th>
+                <th className="w-64 px-2 py-2">Résumé</th>
               </tr>
             </thead>
             <tbody>
               {games.map((game) => (
                 <tr key={game.id} className="border-b border-slate-800 hover:bg-slate-800/50 align-top">
-                  <td className="w-12 px-4 py-4 text-slate-100 align-top">{game.id}</td>
-                  <td className="w-20 px-4 py-4 text-slate-100 align-top">{game.lane}</td>
-                  <td className="px-4 py-4 text-slate-100 align-top">{game.champion}</td>
-                  <td className="px-4 py-4 text-slate-100 align-top">{game.matchup}</td>
-                  <td className="w-20 px-4 py-4 text-slate-100 align-top">{game.result}</td>
-                  <td className="w-24 px-4 py-4 text-slate-100 align-top">{game.cs20}</td>
-                  <td className="w-28 px-4 py-4 text-slate-100 align-top">{game.deaths10}</td>
-                  <td className="min-w-[18rem] px-4 py-4 align-top">
+                  <td className="w-8 px-2 py-3 text-slate-100 text-center">{game.id}</td>
+                  <td className="w-16 px-2 py-3 text-slate-100">{game.lane}</td>
+                  <td className="w-28 px-2 py-3 text-slate-100">{game.champion}</td>
+                  <td className="w-28 px-2 py-3 text-slate-100">{game.matchup}</td>
+                  <td className="w-8 px-2 py-3 text-slate-100 text-center">{String(game.result).charAt(0).toUpperCase()}</td>
+                  <td className="w-20 px-2 py-3 text-slate-100">{game.cs20}</td>
+                  <td className="w-20 px-2 py-3 text-slate-100 text-center">{game.deaths10}</td>
+                  <td className="w-48 px-2 py-3 align-top">
                     {game.errorLane.map((text, index) => (
                       <textarea
                         key={index}
-                        rows={index === game.errorLane.length - 1 ? 1 : 1}
-                        className="mb-2 w-full resize-y rounded border border-slate-700 bg-slate-900/60 px-2 py-2 text-sm text-slate-100"
+                        rows={1}
+                        className="mb-1 h-auto w-full resize-y rounded border border-slate-700 bg-slate-900/60 px-2 py-1 text-xs text-slate-100"
                         value={text}
                         onChange={(e) => updateGame(game.id, "errorLane", e.target.value, index)}
-                        placeholder={index === 0 ? "Erreur en lane..." : "Nouvelle erreur en lane..."}
+                        placeholder={index === 0 ? "Erreur en lane..." : "Nouvelle erreur..."}
                       />
                     ))}
                   </td>
-                  <td className="min-w-[18rem] px-4 py-4 align-top">
+                  <td className="w-48 px-2 py-3 align-top">
                     {game.errorMacro.map((text, index) => (
                       <textarea
                         key={index}
                         rows={1}
-                        className="mb-2 w-full resize-y rounded border border-slate-700 bg-slate-900/60 px-2 py-2 text-sm text-slate-100"
+                        className="mb-1 h-auto w-full resize-y rounded border border-slate-700 bg-slate-900/60 px-2 py-1 text-xs text-slate-100"
                         value={text}
                         onChange={(e) => updateGame(game.id, "errorMacro", e.target.value, index)}
-                        placeholder={index === 0 ? "Erreur de macro..." : "Nouvelle erreur de macro..."}
+                        placeholder={index === 0 ? "Erreur de macro..." : "Nouvelle erreur..."}
                       />
                     ))}
                   </td>
-                  <td className="min-w-[18rem] px-4 py-4 align-top">
+                  <td className="w-48 px-2 py-3 align-top">
                     {game.errorFight.map((text, index) => (
                       <textarea
                         key={index}
                         rows={1}
-                        className="mb-2 w-full resize-y rounded border border-slate-700 bg-slate-900/60 px-2 py-2 text-sm text-slate-100"
+                        className="mb-1 h-auto w-full resize-y rounded border border-slate-700 bg-slate-900/60 px-2 py-1 text-xs text-slate-100"
                         value={text}
                         onChange={(e) => updateGame(game.id, "errorFight", e.target.value, index)}
-                        placeholder={index === 0 ? "Erreur en fight..." : "Nouvelle erreur en fight..."}
+                        placeholder={index === 0 ? "Erreur en fight..." : "Nouvelle erreur..."}
                       />
                     ))}
                   </td>
-                  <td className="min-w-[24rem] px-4 py-4 align-top">
+                  <td className="w-64 px-2 py-3 align-top">
                     <textarea
                       rows={3}
-                      className="h-full min-h-[5rem] w-full resize-y rounded border border-slate-700 bg-slate-900/60 px-2 py-2 text-sm text-slate-100"
+                      className="h-full w-full resize-y rounded border border-slate-700 bg-slate-900/60 px-2 py-1 text-xs text-slate-100"
                       value={game.summary}
                       onChange={(e) => updateGame(game.id, "summary", e.target.value)}
                       placeholder="Résumé / conclusion"
