@@ -50,3 +50,7 @@ alter table public.games
 -- de cache : une game déjà en base n'a pas besoin d'être re-demandée à l'API
 -- Riot.
 alter table public.games add column if not exists queue text;
+
+-- Date réelle de la partie (renvoyée par Riot), utilisée pour l'affichage et
+-- pour restreindre les moyennes d'analyse aux games récentes.
+alter table public.games add column if not exists played_at timestamptz;

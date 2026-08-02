@@ -11,7 +11,9 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function riotFetch<T>(host: string, path: string): Promise<T> {
+const MAX_RETRIES = 5;
+
+async function riotFetch<T>(host: string, path: string, attempt = 0): Promise<T> {
   const apiKey = process.env.RIOT_API_KEY;
   if (!apiKey) {
     throw new Error("RIOT_API_KEY manquante dans .env.local");
@@ -23,9 +25,16 @@ async function riotFetch<T>(host: string, path: string): Promise<T> {
   });
 
   if (res.status === 429) {
+    if (attempt >= MAX_RETRIES) {
+      throw new Error(
+        "Riot API surchargée (quota de la dev key atteint). Attends une minute ou deux avant de réessayer."
+      );
+    }
     const retryAfter = Number(res.headers.get("retry-after") ?? "1");
-    await sleep((retryAfter + 0.5) * 1000);
-    return riotFetch<T>(host, path);
+    // + un peu d'aléatoire pour éviter que les appels en parallèle ne
+    // resynchronisent leurs retries et ne recréent le même pic de requêtes.
+    await sleep((retryAfter + 0.5 + Math.random()) * 1000);
+    return riotFetch<T>(host, path, attempt + 1);
   }
 
   if (!res.ok) {
@@ -63,6 +72,7 @@ export function getMatchIds(puuid: string, opts: MatchIdsOptions = {}) {
 
 export type MatchParticipant = {
   puuid: string;
+  participantId: number;
   championName: string;
   teamId: number;
   teamPosition: string;
@@ -73,7 +83,7 @@ export type MatchParticipant = {
 
 export type MatchDto = {
   metadata: { matchId: string; participants: string[] };
-  info: { gameDuration: number; queueId: number; participants: MatchParticipant[] };
+  info: { gameCreation: number; gameDuration: number; queueId: number; participants: MatchParticipant[] };
 };
 
 export function getMatch(matchId: string) {

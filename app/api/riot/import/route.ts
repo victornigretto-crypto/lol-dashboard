@@ -21,7 +21,7 @@ import {
 const TARGET_COUNT = 20;
 const PAGE_SIZE = 20;
 const MAX_SCAN = 60; // borne de sécurité pour le filtre "all" (évite de scanner à l'infini un joueur qui ne fait que de l'ARAM)
-const CONCURRENCY = 8; // appels Riot en parallèle, reste sous la limite de la dev key (20 req/s)
+const CONCURRENCY = 15; // appels Riot en parallèle, reste sous la limite de la dev key (20 req/s)
 
 type Filter = "soloq" | "ranked" | "all";
 
@@ -34,6 +34,7 @@ type Row = {
   cs20: number;
   deaths10: number;
   queue: string;
+  played_at: string;
 };
 
 type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
@@ -79,13 +80,13 @@ async function buildRowsForMatchIds(
 
   const { data: cached } = await supabase
     .from("games")
-    .select("riot_match_id, lane, champion, matchup, result, cs20, deaths10, queue")
+    .select("riot_match_id, lane, champion, matchup, result, cs20, deaths10, queue, played_at")
     .eq("user_id", userId)
     .in("riot_match_id", matchIds);
 
   const cacheMap = new Map<string, Row>();
   for (const row of cached ?? []) {
-    if (row.riot_match_id && row.queue) {
+    if (row.riot_match_id && row.queue && row.played_at) {
       cacheMap.set(row.riot_match_id, row as Row);
     }
   }
@@ -96,9 +97,11 @@ async function buildRowsForMatchIds(
     const match = await getMatch(matchId);
     if (!isAllowedQueue(match.info.queueId)) return null;
 
-    const participantIndex = match.metadata.participants.indexOf(puuid);
-    if (participantIndex === -1) return null;
-    const participant = match.info.participants[participantIndex];
+    // On identifie le joueur par puuid directement dans info.participants,
+    // sans supposer que cet ordre correspond à celui de metadata.participants :
+    // toute divergence entraînerait un mauvais champion/CS/morts attribués.
+    const participant = match.info.participants.find((p) => p.puuid === puuid);
+    if (!participant) return null;
     const opponent = findOpponent(match, participant);
     const timeline = await getMatchTimeline(matchId);
 
@@ -108,9 +111,10 @@ async function buildRowsForMatchIds(
       champion: participant.championName,
       matchup: opponent?.championName ?? "",
       result: participant.win ? "Victoire" : "Défaite",
-      cs20: Math.round(csAtMinute(timeline, participantIndex + 1, 20)),
+      cs20: Math.round(csAtMinute(timeline, participant.participantId, 20)),
       deaths10: deathsPer10Min(participant.deaths, match.info.gameDuration),
       queue: queueLabel(match.info.queueId),
+      played_at: new Date(match.info.gameCreation).toISOString(),
     };
   });
 

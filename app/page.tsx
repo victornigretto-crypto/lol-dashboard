@@ -15,6 +15,7 @@ type RiotGame = {
   cs20: number;
   deaths10: number;
   queue: string;
+  played_at: string;
 };
 
 type Rank = {
@@ -28,7 +29,7 @@ type Rank = {
 type Filter = "soloq" | "ranked" | "all";
 
 type Severity = "red" | "yellow" | "green";
-type Banner = { severity: Severity; text: string };
+type Banner = { id: string; severity: Severity; text: string; detail: string };
 
 const FILTERS: { key: Filter; label: string }[] = [
   { key: "soloq", label: "SoloQ uniquement" },
@@ -55,6 +56,144 @@ async function fetchGames(riotId: string, filter: Filter) {
   return body as { account: { gameName: string; tagLine: string }; games: RiotGame[]; rank: Rank | null };
 }
 
+function sortBanners(list: Banner[]): Banner[] {
+  return [...list].sort((a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity]);
+}
+
+// Une game est "récente" si elle date de moins de 2 mois : au-delà, elle est
+// repliée dans l'UI et exclue des moyennes d'analyse.
+function isRecent(playedAt: string): boolean {
+  const cutoff = new Date();
+  cutoff.setMonth(cutoff.getMonth() - 2);
+  return new Date(playedAt) >= cutoff;
+}
+
+function filterRecent(games: RiotGame[]): RiotGame[] {
+  return games.filter((g) => isRecent(g.played_at));
+}
+
+function winrateBanner(games: RiotGame[]): Banner | null {
+  if (games.length === 0) return null;
+  const wins = games.filter((g) => g.result === "Victoire").length;
+  const winrate = (wins / games.length) * 100;
+  const detail = `${Math.round(winrate)}% WR sur tes ${games.length} dernières SoloQ`;
+  if (winrate < 37) return { id: "winrate", severity: "red", text: "Alerte LooserQ : fais une pause de tes soloQ", detail };
+  if (winrate < 50) return { id: "winrate", severity: "yellow", text: "Winrate légèrement négatif: Attention !", detail };
+  if (winrate < 62) return { id: "winrate", severity: "green", text: "Winrate positif : continues comme ça", detail };
+  return { id: "winrate", severity: "green", text: "Tu es en train de smurf !", detail };
+}
+
+function championDiversityBanner(games: RiotGame[]): Banner | null {
+  const distinct = new Set(games.map((g) => g.champion)).size;
+  const detail = `${distinct} champions différents sur tes ${games.length} dernières classées`;
+  if (distinct >= 5) return { id: "champions", severity: "red", text: "Trop de champion", detail };
+  if (distinct >= 4) return { id: "champions", severity: "yellow", text: "Un peu trop de champions", detail };
+  return null;
+}
+
+function deathsBanner(games: RiotGame[]): Banner | null {
+  if (games.length === 0) return null;
+  const avg = games.reduce((sum, g) => sum + g.deaths10, 0) / games.length;
+  const detail = `${avg.toFixed(1)} morts/10min en moyenne sur tes ${games.length} dernières classées`;
+  if (avg > 2) return { id: "deaths", severity: "red", text: "Beaucoup trop de morts", detail };
+  if (avg > 1.75) return { id: "deaths", severity: "yellow", text: "Trop de morts", detail };
+  return null;
+}
+
+function farmBanner(games: RiotGame[]): Banner | null {
+  const farmGames = games.filter((g) => FARM_LANES.has(g.lane));
+  if (farmGames.length === 0) return null;
+  const avg = farmGames.reduce((sum, g) => sum + g.cs20, 0) / farmGames.length;
+  const detail = `CS moyen à 20 min : ${Math.round(avg)} (Top/Mid/Bot, ${farmGames.length} game${farmGames.length > 1 ? "s" : ""})`;
+  if (avg < 130) return { id: "farm", severity: "red", text: "Gros manque de farm !", detail };
+  if (avg < 140) return { id: "farm", severity: "yellow", text: "Manque de farm", detail };
+  return null;
+}
+
+function isTilted(games: RiotGame[]): boolean {
+  return games.some((g) => g.queue === "SoloQ" && FARM_LANES.has(g.lane) && g.deaths10 >= 4);
+}
+
+function LoadingDots() {
+  return (
+    <span className="inline-flex items-center gap-1 align-middle">
+      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-500 [animation-delay:-0.3s]" />
+      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-500 [animation-delay:-0.15s]" />
+      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-500" />
+    </span>
+  );
+}
+
+function GameRow({
+  game,
+  championIconUrl,
+  formatGameDate,
+}: {
+  game: RiotGame;
+  championIconUrl: (champion: string) => string | null;
+  formatGameDate: (iso: string) => string;
+}) {
+  const win = game.result.toLowerCase().startsWith("v");
+  const icon = championIconUrl(game.champion);
+  const opponentIcon = game.matchup ? championIconUrl(game.matchup) : null;
+
+  return (
+    <div
+      className={
+        "flex items-center gap-3 rounded-xl border-l-4 bg-slate-900/80 px-4 py-3 " +
+        (win ? "border-green-500" : "border-red-500")
+      }
+    >
+      <p className="w-12 shrink-0 text-center text-[11px] text-slate-500">{formatGameDate(game.played_at)}</p>
+
+      <div className="flex shrink-0 items-center gap-1.5">
+        {icon && (
+          <img
+            src={icon}
+            alt={game.champion}
+            className="h-10 w-10 rounded-full bg-slate-800"
+            onError={(e) => {
+              e.currentTarget.style.display = "none";
+            }}
+          />
+        )}
+        {opponentIcon && (
+          <>
+            <span className="text-[10px] font-extrabold text-red-500">VS</span>
+            <img
+              src={opponentIcon}
+              alt={game.matchup}
+              className="h-10 w-10 rounded-full bg-slate-800"
+              onError={(e) => {
+                e.currentTarget.style.display = "none";
+              }}
+            />
+          </>
+        )}
+      </div>
+
+      <div className="min-w-0 flex-1">
+        <p className="truncate font-medium">{game.champion}</p>
+        <p className="text-xs text-slate-400">
+          {game.lane} · {game.queue}
+        </p>
+      </div>
+
+      <p className={"w-16 text-center text-sm font-semibold " + (win ? "text-green-400" : "text-red-400")}>
+        {win ? "Victoire" : "Défaite"}
+      </p>
+      <div className={"hidden w-16 rounded px-1 py-0.5 text-center text-sm sm:block " + csClass(game.cs20)}>
+        <p className="text-[10px] opacity-80">CS@20</p>
+        <p>{game.cs20}</p>
+      </div>
+      <div className={"hidden w-20 rounded px-1 py-0.5 text-center text-sm sm:block " + deathsClass(game.deaths10)}>
+        <p className="text-[10px] opacity-80">Morts/10m</p>
+        <p>{game.deaths10}</p>
+      </div>
+    </div>
+  );
+}
+
 export default function Home() {
   const router = useRouter();
   const supabase = createClient();
@@ -73,7 +212,9 @@ export default function Home() {
   const [analyzing, setAnalyzing] = useState(false);
   const [analyzeError, setAnalyzeError] = useState<string | null>(null);
   const [banners, setBanners] = useState<Banner[]>([]);
+  const [expandedBanners, setExpandedBanners] = useState<Set<string>>(new Set());
   const [tiltAlert, setTiltAlert] = useState(false);
+  const [showOlder, setShowOlder] = useState(false);
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => setUserEmail(data.user?.email ?? null));
@@ -86,19 +227,20 @@ export default function Home() {
       .catch(() => setDdragonVersion(null));
   }, []);
 
-  const search = async (riotId: string, chosenFilter: Filter): Promise<boolean> => {
+  const search = async (riotId: string, chosenFilter: Filter): Promise<RiotGame[] | null> => {
     setLoading(true);
     setError(null);
+    setShowOlder(false);
     try {
       const body = await fetchGames(riotId, chosenFilter);
       setAccount(body.account);
       setGames(body.games);
       setRank(body.rank);
       setFilter(chosenFilter);
-      return true;
+      return body.games;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Recherche impossible (réseau).");
-      return false;
+      return null;
     } finally {
       setLoading(false);
     }
@@ -108,8 +250,10 @@ export default function Home() {
     e.preventDefault();
     if (!gameName.trim() || !tagLine.trim()) return;
     const riotId = `${gameName.trim()}#${tagLine.trim()}`;
-    const ok = await search(riotId, "soloq");
-    if (ok) handleAnalyze(riotId);
+    // La recherche initiale est déjà filtrée sur "soloq" : on réutilise son
+    // résultat pour le winrate au lieu de le redemander à l'API.
+    const soloqGames = await search(riotId, "soloq");
+    if (soloqGames) handleAnalyze(riotId, soloqGames);
   };
 
   const handleFilterChange = (nextFilter: Filter) => {
@@ -125,58 +269,57 @@ export default function Home() {
     setGameName("");
     setTagLine("");
     setBanners([]);
+    setExpandedBanners(new Set());
     setTiltAlert(false);
     setAnalyzeError(null);
+    setShowOlder(false);
   };
 
-  const handleAnalyze = async (riotId: string) => {
+  const toggleBanner = (id: string) => {
+    setExpandedBanners((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  // Deux jeux de données indépendants, traités en parallèle : le winrate
+  // (soloq) s'affiche dès qu'il est prêt, sans attendre le reste. "ranked"
+  // (SoloQ + Flex) sert de base pour les autres règles : filtré côté Riot,
+  // donc rapide — contrairement à "all" qui doit scanner et jeter les ARAM
+  // une par une. Dans les deux cas, seules les games de moins de 2 mois
+  // entrent dans les moyennes. Si les games soloq viennent d'être chargées
+  // par la recherche, on les réutilise au lieu de refaire l'appel.
+  const handleAnalyze = async (riotId: string, preloadedSoloqGames?: RiotGame[]) => {
     setAnalyzing(true);
     setAnalyzeError(null);
     setBanners([]);
     setTiltAlert(false);
-    try {
-      const [allData, soloqData] = await Promise.all([fetchGames(riotId, "all"), fetchGames(riotId, "soloq")]);
 
-      const next: Banner[] = [];
-
-      const distinctChampions = new Set(allData.games.map((g) => g.champion)).size;
-      if (distinctChampions >= 5) next.push({ severity: "red", text: "Trop de champion" });
-      else if (distinctChampions >= 4) next.push({ severity: "yellow", text: "Un peu trop de champions" });
-
-      const avgDeaths10 = allData.games.length
-        ? allData.games.reduce((sum, g) => sum + g.deaths10, 0) / allData.games.length
-        : 0;
-      if (avgDeaths10 > 2) next.push({ severity: "red", text: "Beaucoup trop de morts" });
-      else if (avgDeaths10 > 1.75) next.push({ severity: "yellow", text: "Trop de morts" });
-
-      const farmGames = allData.games.filter((g) => FARM_LANES.has(g.lane));
-      if (farmGames.length > 0) {
-        const avgCs20 = farmGames.reduce((sum, g) => sum + g.cs20, 0) / farmGames.length;
-        if (avgCs20 < 130) next.push({ severity: "red", text: "Gros manque de farm !" });
-        else if (avgCs20 < 140) next.push({ severity: "yellow", text: "Manque de farm" });
-      }
-
-      const tilted = allData.games.some(
-        (g) => g.queue === "SoloQ" && FARM_LANES.has(g.lane) && g.deaths10 >= 4
-      );
-      setTiltAlert(tilted);
-
-      if (soloqData.games.length > 0) {
-        const wins = soloqData.games.filter((g) => g.result === "Victoire").length;
-        const winrate = (wins / soloqData.games.length) * 100;
-        if (winrate < 37) next.push({ severity: "red", text: "Alerte LooserQ : fais une pause de tes soloQ" });
-        else if (winrate < 50) next.push({ severity: "yellow", text: "Winrate légèrement négatif: Attention !" });
-        else if (winrate < 62) next.push({ severity: "green", text: "Winrate positif : continues comme ça" });
-        else next.push({ severity: "green", text: "Tu es en train de smurf !" });
-      }
-
-      next.sort((a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity]);
-      setBanners(next);
-    } catch (err) {
+    const onFail = (err: unknown) => {
       setAnalyzeError(err instanceof Error ? err.message : "Analyse impossible (réseau).");
-    } finally {
-      setAnalyzing(false);
-    }
+    };
+
+    const soloqTask = (preloadedSoloqGames ? Promise.resolve({ games: preloadedSoloqGames }) : fetchGames(riotId, "soloq")).then((data) => {
+      const recent = filterRecent(data.games);
+      const banner = winrateBanner(recent);
+      if (banner) setBanners((prev) => sortBanners([...prev, banner]));
+    }, onFail);
+
+    const rankedTask = fetchGames(riotId, "ranked").then((data) => {
+      const recent = filterRecent(data.games);
+      const extra = [
+        championDiversityBanner(recent),
+        deathsBanner(recent),
+        farmBanner(recent),
+      ].filter((b): b is Banner => b !== null);
+      if (extra.length > 0) setBanners((prev) => sortBanners([...prev, ...extra]));
+      setTiltAlert(isTilted(recent));
+    }, onFail);
+
+    await Promise.allSettled([soloqTask, rankedTask]);
+    setAnalyzing(false);
   };
 
   const handleLogout = async () => {
@@ -185,10 +328,14 @@ export default function Home() {
     router.refresh();
   };
 
-  const isWin = (result: string) => result.toLowerCase().startsWith("v");
-
   const championIconUrl = (champion: string) =>
     ddragonVersion ? `https://ddragon.leagueoflegends.com/cdn/${ddragonVersion}/img/champion/${champion}.png` : null;
+
+  const formatGameDate = (iso: string) =>
+    new Date(iso).toLocaleDateString("fr-FR", { day: "2-digit", month: "short" });
+
+  const recentGames = games.filter((g) => isRecent(g.played_at));
+  const olderGames = games.filter((g) => !isRecent(g.played_at));
 
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100">
@@ -245,136 +392,129 @@ export default function Home() {
         </div>
       ) : (
         <div className="mx-auto max-w-6xl px-4 pb-16">
-          <div className="mt-6 grid grid-cols-1 gap-6 sm:grid-cols-2">
-            <div className="text-center sm:text-left">
-              <h1 className="text-3xl font-bold">
-                {account.gameName}
-                <span className="text-slate-500">#{account.tagLine}</span>
-              </h1>
-              <button
-                onClick={handleNewSearch}
-                className="mt-2 text-sm text-slate-400 underline hover:text-slate-200"
-              >
-                Nouvelle recherche
-              </button>
-            </div>
-
-            <div className="flex flex-col items-center">
-              {rank ? (
-                <>
-                  <img
-                    src={rankEmblemUrl(rank.tier)}
-                    alt={rank.tier}
-                    className="h-24 w-24"
-                    onError={(e) => {
-                      e.currentTarget.style.display = "none";
-                    }}
-                  />
-                  <p className="mt-1 text-2xl font-bold">{rankLabel(rank.tier, rank.rank)}</p>
-                  <p className="text-slate-400">{rank.leaguePoints} LP</p>
-                </>
-              ) : (
-                <p className="text-slate-400">Non classé en SoloQ</p>
-              )}
-            </div>
-          </div>
-
-          <div className="mt-8 grid grid-cols-1 gap-6 md:grid-cols-[260px_1fr]">
-            <aside className="h-fit rounded-2xl border border-slate-700 bg-slate-900/60 p-4">
-              <h2 className="text-lg font-semibold text-slate-200">Analyse</h2>
-              {analyzing ? (
-                <p className="mt-3 text-sm text-slate-400">Analyse en cours...</p>
-              ) : analyzeError ? (
-                <p className="mt-3 text-sm text-red-400">{analyzeError}</p>
-              ) : banners.length > 0 ? (
-                <div className="mt-3 flex flex-col gap-2">
-                  {banners.map((b, i) => (
-                    <div
-                      key={i}
-                      className={"rounded-lg px-3 py-2 text-sm font-semibold " + SEVERITY_CLASS[b.severity]}
-                    >
-                      {b.text}
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="mt-3 text-sm text-slate-400">Rien à signaler.</p>
-              )}
-            </aside>
-
-            <div>
-              <div className="flex flex-wrap gap-2">
-                {FILTERS.map((f) => (
-                  <button
-                    key={f.key}
-                    onClick={() => handleFilterChange(f.key)}
-                    disabled={loading}
-                    className={
-                      "rounded-full px-4 py-2 text-sm font-medium transition disabled:opacity-50 " +
-                      (filter === f.key
-                        ? "bg-blue-600 text-white"
-                        : "border border-slate-700 text-slate-300 hover:bg-slate-800")
-                    }
-                  >
-                    {f.label}
-                  </button>
-                ))}
+          <div className="mt-6 grid grid-cols-1 gap-6 md:grid-cols-[300px_1fr]">
+            <div className="flex flex-col gap-6">
+              <div className="rounded-2xl border border-slate-700 bg-slate-900/60 p-4 text-center md:text-left">
+                <h1 className="text-2xl font-bold break-words">
+                  {account.gameName}
+                  <span className="text-slate-500">#{account.tagLine}</span>
+                </h1>
+                <button
+                  onClick={handleNewSearch}
+                  className="mt-2 text-sm text-slate-400 underline hover:text-slate-200"
+                >
+                  Nouvelle recherche
+                </button>
               </div>
 
-              {error && <p className="mt-4 text-center text-sm text-red-400">{error}</p>}
-
-              <div className="mt-4 flex flex-col gap-2">
-                {loading ? (
-                  <p className="text-center text-slate-400">Chargement des games...</p>
-                ) : games.length === 0 ? (
-                  <p className="text-center text-slate-400">Aucune game trouvée pour ce filtre.</p>
-                ) : (
-                  games.map((game) => {
-                    const win = isWin(game.result);
-                    const icon = championIconUrl(game.champion);
-                    return (
-                      <div
-                        key={game.riot_match_id}
-                        className={
-                          "flex items-center gap-4 rounded-xl border-l-4 bg-slate-900/80 px-4 py-3 " +
-                          (win ? "border-green-500" : "border-red-500")
-                        }
-                      >
-                        {icon && (
-                          <img
-                            src={icon}
-                            alt={game.champion}
-                            className="h-10 w-10 shrink-0 rounded-full bg-slate-800"
-                            onError={(e) => {
-                              e.currentTarget.style.display = "none";
-                            }}
-                          />
-                        )}
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate font-medium">{game.champion}</p>
-                          <p className="text-xs text-slate-400">
-                            {game.lane} · {game.queue}
-                          </p>
-                        </div>
-                        <p className={"w-16 text-center text-sm font-semibold " + (win ? "text-green-400" : "text-red-400")}>
-                          {win ? "Victoire" : "Défaite"}
-                        </p>
-                        <div className={"hidden w-16 rounded px-1 py-0.5 text-center text-sm sm:block " + csClass(game.cs20)}>
-                          <p className="text-[10px] opacity-80">CS@20</p>
-                          <p>{game.cs20}</p>
-                        </div>
-                        <div className={"hidden w-20 rounded px-1 py-0.5 text-center text-sm sm:block " + deathsClass(game.deaths10)}>
-                          <p className="text-[10px] opacity-80">Morts/10m</p>
-                          <p>{game.deaths10}</p>
-                        </div>
-                        <div className="hidden w-24 text-right text-sm text-slate-400 md:block">
-                          <p className="text-slate-500">Matchup</p>
-                          <p className="truncate">{game.matchup || "—"}</p>
-                        </div>
-                      </div>
-                    );
-                  })
+              <aside className="rounded-2xl border border-slate-700 bg-slate-900/60 p-4">
+                <h2 className="flex items-center gap-2 text-lg font-semibold text-slate-200">
+                  Analyse
+                  {analyzing && <LoadingDots />}
+                </h2>
+                {banners.length > 0 ? (
+                  <div className="mt-3 flex flex-col gap-2">
+                    {banners.map((b) => {
+                      const expanded = expandedBanners.has(b.id);
+                      return (
+                        <button
+                          key={b.id}
+                          onClick={() => toggleBanner(b.id)}
+                          className={
+                            "w-full rounded-lg px-3 py-2 text-left text-sm font-semibold transition " +
+                            SEVERITY_CLASS[b.severity]
+                          }
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span>{b.text}</span>
+                            <span className={"text-xs transition-transform " + (expanded ? "rotate-180" : "")}>
+                              ▾
+                            </span>
+                          </div>
+                          {expanded && <p className="mt-1 text-xs font-normal opacity-90">{b.detail}</p>}
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : null}
+                {analyzeError && <p className="mt-3 text-sm text-red-400">{analyzeError}</p>}
+                {!analyzing && !analyzeError && banners.length === 0 && (
+                  <p className="mt-3 text-sm text-slate-400">Rien à signaler.</p>
                 )}
+              </aside>
+            </div>
+
+            <div className="flex flex-col gap-6">
+              <div className="flex min-h-[172px] flex-col items-center justify-center rounded-2xl border border-slate-700 bg-slate-900/60 p-4">
+                {rank ? (
+                  <>
+                    <img
+                      src={rankEmblemUrl(rank.tier)}
+                      alt={rank.tier}
+                      className="h-20 w-20 object-contain"
+                      onError={(e) => {
+                        e.currentTarget.style.display = "none";
+                      }}
+                    />
+                    <p className="mt-1 text-2xl font-bold">{rankLabel(rank.tier, rank.rank)}</p>
+                    <p className="text-slate-400">{rank.leaguePoints} LP</p>
+                  </>
+                ) : (
+                  <p className="text-slate-400">Non classé en SoloQ</p>
+                )}
+              </div>
+
+              <div>
+                <div className="flex flex-wrap gap-2">
+                  {FILTERS.map((f) => (
+                    <button
+                      key={f.key}
+                      onClick={() => handleFilterChange(f.key)}
+                      disabled={loading}
+                      className={
+                        "rounded-full px-4 py-2 text-sm font-medium transition disabled:opacity-50 " +
+                        (filter === f.key
+                          ? "bg-blue-600 text-white"
+                          : "border border-slate-700 text-slate-300 hover:bg-slate-800")
+                      }
+                    >
+                      {f.label}
+                    </button>
+                  ))}
+                </div>
+
+                {error && <p className="mt-4 text-center text-sm text-red-400">{error}</p>}
+
+                <div className="mt-4 flex flex-col gap-2">
+                  {loading ? (
+                    <p className="text-center text-slate-400">Chargement des games...</p>
+                  ) : games.length === 0 ? (
+                    <p className="text-center text-slate-400">Aucune game trouvée pour ce filtre.</p>
+                  ) : (
+                    <>
+                      {recentGames.map((game) => (
+                        <GameRow key={game.riot_match_id} game={game} championIconUrl={championIconUrl} formatGameDate={formatGameDate} />
+                      ))}
+                      {recentGames.length === 0 && olderGames.length > 0 && (
+                        <p className="text-center text-slate-400">Aucune game de moins de 2 mois pour ce filtre.</p>
+                      )}
+                      {olderGames.length > 0 && (
+                        <button
+                          onClick={() => setShowOlder((v) => !v)}
+                          className="mt-2 rounded-lg border border-slate-700 px-4 py-2 text-sm text-slate-300 hover:bg-slate-800"
+                        >
+                          {showOlder
+                            ? "Masquer les parties datant de plus de 2 mois"
+                            : `Voir les parties datant de plus de 2 mois (${olderGames.length})`}
+                        </button>
+                      )}
+                      {showOlder &&
+                        olderGames.map((game) => (
+                          <GameRow key={game.riot_match_id} game={game} championIconUrl={championIconUrl} formatGameDate={formatGameDate} />
+                        ))}
+                    </>
+                  )}
+                </div>
               </div>
             </div>
           </div>
