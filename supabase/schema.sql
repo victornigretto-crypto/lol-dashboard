@@ -54,3 +54,37 @@ alter table public.games add column if not exists queue text;
 -- Date réelle de la partie (renvoyée par Riot), utilisée pour l'affichage et
 -- pour restreindre les moyennes d'analyse aux games récentes.
 alter table public.games add column if not exists played_at timestamptz;
+
+-- Lien persistant entre un user et SON compte Riot (un seul compte par
+-- user). Sert d'invariant : le contenu de `games` pour un user ne doit
+-- jamais provenir d'un autre puuid que celui lié ici.
+create table if not exists public.profiles (
+  user_id uuid primary key references auth.users(id) on delete cascade default auth.uid(),
+  puuid text,
+  riot_id text,
+  primary_role text,
+  secondary_role text,
+  former_rank text,
+  onboarded_at timestamptz,
+  created_at timestamptz not null default now()
+);
+
+alter table public.profiles enable row level security;
+
+create policy "profiles_select_own" on public.profiles
+  for select using (auth.uid() = user_id);
+
+create policy "profiles_insert_own" on public.profiles
+  for insert with check (auth.uid() = user_id);
+
+create policy "profiles_update_own" on public.profiles
+  for update using (auth.uid() = user_id);
+
+-- CS de fin de partie + durée de la game : permettent de calculer le CS/min
+-- avant et après 20 minutes (au lieu du seul CS@20 dans l'absolu), et de
+-- recalibrer les seuils de couleur par palier plutôt que sur une échelle
+-- unique. Nullable : les games déjà en base (ou saisies à la main dans
+-- /suivi) n'ont simplement pas cette donnée tant qu'elles ne sont pas
+-- réimportées.
+alter table public.games add column if not exists cs_final numeric;
+alter table public.games add column if not exists game_duration_seconds numeric;

@@ -40,8 +40,21 @@ export async function updateSession(request: NextRequest) {
   // fasse.
   const isAuthRoute = request.nextUrl.pathname.startsWith("/auth");
   const isResetPasswordRoute = request.nextUrl.pathname.startsWith("/reset-password");
+  // Porte d'entrée publique : analyse gratuite (accueil) + les pages de
+  // motivation qui servent de pont vers l'inscription. Accessibles sans
+  // compte ; app/page.tsx redirige lui-même les users connectés vers /suivi.
+  // /api/riot/import doit rester public aussi : c'est l'API que l'accueil
+  // appelle pour l'analyse gratuite d'un visiteur non connecté (route
+  // handler, pas une page — une redirection HTML ici casserait le fetch()
+  // côté client). /api/profile/link reste protégée : elle écrit sur LE
+  // profil d'un user connecté, pas de sens pour un visiteur anonyme.
+  const isPublicRoute =
+    request.nextUrl.pathname === "/" ||
+    request.nextUrl.pathname.startsWith("/decouvrir") ||
+    request.nextUrl.pathname.startsWith("/rejoindre") ||
+    request.nextUrl.pathname.startsWith("/api/riot/import");
 
-  if (!user && !isLoginRoute && !isAuthRoute && !isResetPasswordRoute) {
+  if (!user && !isLoginRoute && !isAuthRoute && !isResetPasswordRoute && !isPublicRoute) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     return NextResponse.redirect(url);

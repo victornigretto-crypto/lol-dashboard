@@ -79,6 +79,8 @@ export type MatchParticipant = {
   individualPosition: string;
   win: boolean;
   deaths: number;
+  totalMinionsKilled: number;
+  neutralMinionsKilled: number;
 };
 
 export type MatchDto = {

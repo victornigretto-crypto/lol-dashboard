@@ -14,7 +14,9 @@ import {
   findOpponent,
   isAllowedQueue,
   laneLabel,
+  parseRiotId,
   queueLabel,
+  totalCs,
   QUEUE_SOLOQ,
 } from "@/lib/riot/transform";
 
@@ -35,16 +37,13 @@ type Row = {
   deaths10: number;
   queue: string;
   played_at: string;
+  // Nullable : les games déjà en cache avant la Slice 3 n'ont pas ces
+  // colonnes tant qu'elles ne sont pas réimportées (cf. buildRowsForMatchIds).
+  cs_final: number | null;
+  game_duration_seconds: number | null;
 };
 
 type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
-
-function parseRiotId(raw: string): { gameName: string; tagLine: string } | null {
-  const trimmed = raw.trim();
-  const hashIndex = trimmed.lastIndexOf("#");
-  if (hashIndex <= 0 || hashIndex === trimmed.length - 1) return null;
-  return { gameName: trimmed.slice(0, hashIndex), tagLine: trimmed.slice(hashIndex + 1) };
-}
 
 // Récupère les identifiants de matchs candidats selon le filtre choisi.
 // - soloq / ranked : Riot filtre déjà côté serveur (queue / type), pas de gaspillage d'appels.
@@ -70,24 +69,33 @@ async function collectCandidateMatchIds(puuid: string, filter: Filter): Promise<
 // Construit les lignes d'affichage pour une liste de matchIds, en réutilisant
 // tout ce qui est déjà en base (une game finie ne change jamais) et en
 // n'appelant l'API Riot que pour les matchs réellement inconnus, en parallèle.
+//
+// `persist` doit être false quand le puuid analysé n'est pas le compte Riot
+// lié à ce user (cf. garde-fou anti-pollution dans POST) : on saute alors le
+// cache ET l'upsert, pour ne jamais lire ni écrire dans les games d'un autre
+// compte. L'aperçu reste éphémère, jamais stocké.
 async function buildRowsForMatchIds(
   matchIds: string[],
   puuid: string,
-  userId: string,
-  supabase: SupabaseServerClient
+  userId: string | null,
+  supabase: SupabaseServerClient,
+  persist: boolean
 ): Promise<Row[]> {
   if (matchIds.length === 0) return [];
 
-  const { data: cached } = await supabase
-    .from("games")
-    .select("riot_match_id, lane, champion, matchup, result, cs20, deaths10, queue, played_at")
-    .eq("user_id", userId)
-    .in("riot_match_id", matchIds);
-
   const cacheMap = new Map<string, Row>();
-  for (const row of cached ?? []) {
-    if (row.riot_match_id && row.queue && row.played_at) {
-      cacheMap.set(row.riot_match_id, row as Row);
+
+  if (persist) {
+    const { data: cached } = await supabase
+      .from("games")
+      .select("riot_match_id, lane, champion, matchup, result, cs20, deaths10, queue, played_at, cs_final, game_duration_seconds")
+      .eq("user_id", userId)
+      .in("riot_match_id", matchIds);
+
+    for (const row of cached ?? []) {
+      if (row.riot_match_id && row.queue && row.played_at) {
+        cacheMap.set(row.riot_match_id, row as Row);
+      }
     }
   }
 
@@ -115,12 +123,14 @@ async function buildRowsForMatchIds(
       deaths10: deathsPer10Min(participant.deaths, match.info.gameDuration),
       queue: queueLabel(match.info.queueId),
       played_at: new Date(match.info.gameCreation).toISOString(),
+      cs_final: totalCs(participant),
+      game_duration_seconds: match.info.gameDuration,
     };
   });
 
   const newRows = freshRows.filter((row): row is Row => row !== null);
 
-  if (newRows.length > 0) {
+  if (persist && newRows.length > 0) {
     const { error } = await supabase
       .from("games")
       .upsert(
@@ -142,9 +152,6 @@ export async function POST(request: Request) {
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) {
-    return NextResponse.json({ error: "Non authentifié." }, { status: 401 });
-  }
 
   const body = await request.json().catch(() => null);
   const parsed = typeof body?.riotId === "string" ? parseRiotId(body.riotId) : null;
@@ -156,12 +163,28 @@ export async function POST(request: Request) {
   try {
     const account = await getAccountByRiotId(parsed.gameName, parsed.tagLine);
 
+    // Invariant anti-pollution : les games en base pour ce user ne doivent
+    // provenir que de SON compte Riot lié. Si l'analyse porte sur un autre
+    // puuid (pas encore lié, ou recherche curieuse d'un autre compte), les
+    // lignes restent un aperçu éphémère, jamais écrites dans `games`. Un
+    // visiteur non connecté (analyse publique gratuite, Slice 4) n'a de
+    // toute façon aucun endroit où persister : toujours éphémère.
+    const persist = await (async () => {
+      if (!user) return false;
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("puuid")
+        .eq("user_id", user.id)
+        .maybeSingle();
+      return profile?.puuid === account.puuid;
+    })();
+
     const [candidateIds, rankEntries] = await Promise.all([
       collectCandidateMatchIds(account.puuid, filter),
       getRankedEntriesByPuuid(account.puuid).catch(() => []),
     ]);
 
-    const rows = await buildRowsForMatchIds(candidateIds, account.puuid, user.id, supabase);
+    const rows = await buildRowsForMatchIds(candidateIds, account.puuid, user?.id ?? null, supabase, persist);
     const games = rows.slice(0, TARGET_COUNT);
 
     const soloq = rankEntries.find((entry) => entry.queueType === "RANKED_SOLO_5x5") ?? null;

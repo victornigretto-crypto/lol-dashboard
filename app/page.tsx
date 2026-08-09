@@ -3,8 +3,9 @@ import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { csClass, deathsClass } from "@/lib/stats";
+import { csClass, csPerMinClass, csPerMinThresholdsFor, deathsClass } from "@/lib/stats";
 import { rankEmblemUrl, rankLabel } from "@/lib/riot/rank";
+import { parseRiotId } from "@/lib/riot/transform";
 
 type RiotGame = {
   riot_match_id: string;
@@ -16,6 +17,8 @@ type RiotGame = {
   deaths10: number;
   queue: string;
   played_at: string;
+  cs_final: number | null;
+  game_duration_seconds: number | null;
 };
 
 type Rank = {
@@ -126,16 +129,29 @@ function LoadingDots() {
 
 function GameRow({
   game,
+  tier,
   championIconUrl,
   formatGameDate,
 }: {
   game: RiotGame;
+  tier: string | null;
   championIconUrl: (champion: string) => string | null;
   formatGameDate: (iso: string) => string;
 }) {
   const win = game.result.toLowerCase().startsWith("v");
   const icon = championIconUrl(game.champion);
   const opponentIcon = game.matchup ? championIconUrl(game.matchup) : null;
+
+  // Ancien cache sans cs_final/game_duration_seconds (pré-Slice 3) : on
+  // retombe sur l'ancien badge CS@20 tant que la game n'est pas réimportée.
+  const hasCsPerMin = game.cs_final !== null && game.game_duration_seconds !== null;
+  const durationMinutes = hasCsPerMin ? (game.game_duration_seconds as number) / 60 : 0;
+  const csPerMinPre20 = hasCsPerMin ? Math.round((game.cs20 / Math.min(20, durationMinutes)) * 10) / 10 : 0;
+  const csPerMinPost20 =
+    hasCsPerMin && durationMinutes > 20
+      ? Math.round((((game.cs_final as number) - game.cs20) / (durationMinutes - 20)) * 10) / 10
+      : null;
+  const thresholds = csPerMinThresholdsFor(game.lane, tier);
 
   return (
     <div
@@ -182,10 +198,28 @@ function GameRow({
       <p className={"w-16 text-center text-sm font-semibold " + (win ? "text-green-400" : "text-red-400")}>
         {win ? "Victoire" : "Défaite"}
       </p>
-      <div className={"hidden w-16 rounded px-1 py-0.5 text-center text-sm sm:block " + csClass(game.cs20)}>
-        <p className="text-[10px] opacity-80">CS@20</p>
-        <p>{game.cs20}</p>
-      </div>
+      {hasCsPerMin ? (
+        <>
+          <div className={"hidden w-16 rounded px-1 py-0.5 text-center text-sm sm:block " + csPerMinClass(csPerMinPre20, thresholds)}>
+            <p className="text-[10px] opacity-80">CS/min &lt;20</p>
+            <p>{csPerMinPre20}</p>
+          </div>
+          <div
+            className={
+              "hidden w-16 rounded px-1 py-0.5 text-center text-sm sm:block " +
+              (csPerMinPost20 !== null ? csPerMinClass(csPerMinPost20, thresholds) : "bg-slate-800 text-slate-500")
+            }
+          >
+            <p className="text-[10px] opacity-80">CS/min &gt;20</p>
+            <p>{csPerMinPost20 ?? "—"}</p>
+          </div>
+        </>
+      ) : (
+        <div className={"hidden w-16 rounded px-1 py-0.5 text-center text-sm sm:block " + csClass(game.cs20)}>
+          <p className="text-[10px] opacity-80">CS@20</p>
+          <p>{game.cs20}</p>
+        </div>
+      )}
       <div className={"hidden w-20 rounded px-1 py-0.5 text-center text-sm sm:block " + deathsClass(game.deaths10)}>
         <p className="text-[10px] opacity-80">Morts/10m</p>
         <p>{game.deaths10}</p>
@@ -198,8 +232,7 @@ export default function Home() {
   const router = useRouter();
   const supabase = createClient();
 
-  const [gameName, setGameName] = useState("");
-  const [tagLine, setTagLine] = useState("");
+  const [riotIdInput, setRiotIdInput] = useState("");
   const [account, setAccount] = useState<{ gameName: string; tagLine: string } | null>(null);
   const [rank, setRank] = useState<Rank | null>(null);
   const [filter, setFilter] = useState<Filter>("soloq");
@@ -207,7 +240,6 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [ddragonVersion, setDdragonVersion] = useState<string | null>(null);
-  const [userEmail, setUserEmail] = useState<string | null>(null);
 
   const [analyzing, setAnalyzing] = useState(false);
   const [analyzeError, setAnalyzeError] = useState<string | null>(null);
@@ -216,9 +248,36 @@ export default function Home() {
   const [tiltAlert, setTiltAlert] = useState(false);
   const [showOlder, setShowOlder] = useState(false);
 
+  // Porte d'entrée unique (Slice 4) : "/" est la page publique d'analyse
+  // gratuite. Un user déjà connecté n'a rien à y faire — il atterrit direct
+  // sur son cockpit (ou sur l'onboarding s'il n'a pas encore lié son compte
+  // Riot). `checkingSession` évite un flash de la page marketing pendant la
+  // vérification.
+  const [checkingSession, setCheckingSession] = useState(true);
+
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => setUserEmail(data.user?.email ?? null));
-  }, [supabase]);
+    let active = true;
+    (async () => {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!active) return;
+      if (!user) {
+        setCheckingSession(false);
+        return;
+      }
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("onboarded_at")
+        .eq("user_id", user.id)
+        .maybeSingle();
+      if (!active) return;
+      router.replace(profile?.onboarded_at ? "/suivi" : "/onboarding");
+    })();
+    return () => {
+      active = false;
+    };
+  }, [supabase, router]);
 
   useEffect(() => {
     fetch("https://ddragon.leagueoflegends.com/api/versions.json")
@@ -248,8 +307,12 @@ export default function Home() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!gameName.trim() || !tagLine.trim()) return;
-    const riotId = `${gameName.trim()}#${tagLine.trim()}`;
+    const parsed = parseRiotId(riotIdInput);
+    if (!parsed) {
+      setError("Format attendu : Pseudo#TAG");
+      return;
+    }
+    const riotId = `${parsed.gameName}#${parsed.tagLine}`;
     // La recherche initiale est déjà filtrée sur "soloq" : on réutilise son
     // résultat pour le winrate au lieu de le redemander à l'API.
     const soloqGames = await search(riotId, "soloq");
@@ -266,8 +329,7 @@ export default function Home() {
     setGames([]);
     setRank(null);
     setError(null);
-    setGameName("");
-    setTagLine("");
+    setRiotIdInput("");
     setBanners([]);
     setExpandedBanners(new Set());
     setTiltAlert(false);
@@ -322,12 +384,6 @@ export default function Home() {
     setAnalyzing(false);
   };
 
-  const handleLogout = async () => {
-    await supabase.auth.signOut();
-    router.push("/login");
-    router.refresh();
-  };
-
   const championIconUrl = (champion: string) =>
     ddragonVersion ? `https://ddragon.leagueoflegends.com/cdn/${ddragonVersion}/img/champion/${champion}.png` : null;
 
@@ -337,6 +393,14 @@ export default function Home() {
   const recentGames = games.filter((g) => isRecent(g.played_at));
   const olderGames = games.filter((g) => !isRecent(g.played_at));
 
+  if (checkingSession) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-slate-950 text-slate-100">
+        <LoadingDots />
+      </main>
+    );
+  }
+
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100">
       {tiltAlert && (
@@ -345,50 +409,38 @@ export default function Home() {
         </div>
       )}
 
-      <div className="flex items-center justify-end gap-3 p-4 text-sm text-slate-400">
-        {userEmail && <span className="hidden sm:inline">{userEmail}</span>}
-        <Link href="/suivi" className="rounded border border-slate-700 px-3 py-1 hover:bg-slate-800">
-          Mon suivi
-        </Link>
-        <button onClick={handleLogout} className="rounded border border-slate-700 px-3 py-1 hover:bg-slate-800">
-          Se déconnecter
-        </button>
-      </div>
-
       {!account ? (
-        <div className="flex flex-col items-center justify-center px-4 pt-20 pb-32 text-center">
-          <h1 className="text-5xl font-bold tracking-tight">SoloQ Dashboard</h1>
-          <p className="mt-3 text-lg text-slate-400">Analyse ton profil</p>
+        <div className="relative flex flex-col items-center justify-center overflow-hidden px-4 pt-20 pb-32 text-center">
+          <div className="pointer-events-none absolute -top-32 left-1/2 h-96 w-96 -translate-x-1/2 rounded-full bg-blue-600/20 blur-3xl" />
+          <h1 className="relative text-5xl font-bold tracking-tight">GG Dashboard</h1>
+          <p className="relative mt-3 text-lg text-slate-400">Analyse gratuite de ton profil League of Legends</p>
 
-          <form onSubmit={handleSubmit} className="mt-10 flex w-full max-w-xl items-center gap-2">
-            <div className="flex flex-1 items-center rounded-full border border-slate-700 bg-slate-900 px-5 py-3 focus-within:border-blue-500">
-              <input
-                type="text"
-                value={gameName}
-                onChange={(e) => setGameName(e.target.value)}
-                placeholder="Pseudo"
-                autoFocus
-                className="min-w-0 flex-1 bg-transparent text-slate-100 outline-none"
-              />
-              <span className="px-1 text-lg text-slate-500">#</span>
-              <input
-                type="text"
-                value={tagLine}
-                onChange={(e) => setTagLine(e.target.value)}
-                placeholder="TAG"
-                className="w-20 bg-transparent text-slate-100 outline-none"
-              />
-            </div>
+          <form onSubmit={handleSubmit} className="relative mt-10 flex w-full max-w-xl items-center gap-2">
+            <input
+              type="text"
+              value={riotIdInput}
+              onChange={(e) => setRiotIdInput(e.target.value)}
+              placeholder="Pseudo#TAG"
+              autoFocus
+              className="min-w-0 flex-1 rounded-full border border-slate-700 bg-slate-900 px-5 py-3 text-slate-100 outline-none focus:border-blue-500"
+            />
             <button
               type="submit"
-              disabled={loading || !gameName.trim() || !tagLine.trim()}
+              disabled={loading || !riotIdInput.trim()}
               className="rounded-full bg-blue-600 px-6 py-3 font-semibold hover:bg-blue-500 disabled:opacity-50"
             >
               {loading ? "..." : "GO"}
             </button>
           </form>
 
-          {error && <p className="mt-4 text-sm text-red-400">{error}</p>}
+          {error && <p className="relative mt-4 text-sm text-red-400">{error}</p>}
+
+          <p className="relative mt-6 text-xs text-slate-500">
+            Déjà un compte ?{" "}
+            <Link href="/login" className="underline hover:text-slate-300">
+              Connecte-toi
+            </Link>
+          </p>
         </div>
       ) : (
         <div className="mx-auto max-w-6xl px-4 pb-16">
@@ -442,6 +494,20 @@ export default function Home() {
                   <p className="mt-3 text-sm text-slate-400">Rien à signaler.</p>
                 )}
               </aside>
+
+              <div className="rounded-2xl border border-blue-500/40 bg-blue-500/10 p-4 text-center md:text-left">
+                <p className="text-sm font-semibold text-blue-300">Envie de suivre ta progression ?</p>
+                <p className="mt-1 text-sm text-slate-300">
+                  Crée un compte gratuit pour garder l&apos;historique de tes games et ton propre cockpit, sans
+                  tout retaper à chaque fois.
+                </p>
+                <Link
+                  href="/decouvrir"
+                  className="mt-3 inline-block rounded-full bg-blue-600 px-4 py-2 text-sm font-semibold hover:bg-blue-500"
+                >
+                  Découvrir
+                </Link>
+              </div>
             </div>
 
             <div className="flex flex-col gap-6">
@@ -493,7 +559,7 @@ export default function Home() {
                   ) : (
                     <>
                       {recentGames.map((game) => (
-                        <GameRow key={game.riot_match_id} game={game} championIconUrl={championIconUrl} formatGameDate={formatGameDate} />
+                        <GameRow key={game.riot_match_id} game={game} tier={rank?.tier ?? null} championIconUrl={championIconUrl} formatGameDate={formatGameDate} />
                       ))}
                       {recentGames.length === 0 && olderGames.length > 0 && (
                         <p className="text-center text-slate-400">Aucune game de moins de 2 mois pour ce filtre.</p>
@@ -510,7 +576,7 @@ export default function Home() {
                       )}
                       {showOlder &&
                         olderGames.map((game) => (
-                          <GameRow key={game.riot_match_id} game={game} championIconUrl={championIconUrl} formatGameDate={formatGameDate} />
+                          <GameRow key={game.riot_match_id} game={game} tier={rank?.tier ?? null} championIconUrl={championIconUrl} formatGameDate={formatGameDate} />
                         ))}
                     </>
                   )}

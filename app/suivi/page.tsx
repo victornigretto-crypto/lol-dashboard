@@ -211,7 +211,7 @@ export default function SuiviPage() {
           <div className="flex items-start justify-between gap-4">
             <div>
               <Link href="/" className="text-sm uppercase tracking-[0.3em] text-slate-400 hover:text-slate-200">
-                ← SoloQ Dashboard
+                ← GG Dashboard
               </Link>
               <h1 className="mt-4 text-4xl font-semibold">Suivi de mes games</h1>
               <p className="mt-2 max-w-2xl text-slate-400">

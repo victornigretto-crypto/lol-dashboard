@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__Claude_Browser__navigate",
+      "Bash(npx tsc --noEmit *)",
+      "Bash(npm run dev*)",
+      "Bash(curl -sI http://localhost:*)",
+      "mcp__Claude_Browser__read_page",
+      "Bash(curl -sf http://localhost:*)",
+      "mcp__Claude_Browser__read_console_messages",
+      "mcp__Claude_Browser__tabs_context",
+      "Bash(curl -sS * https://rpfqpqebnuemalgshzyd.supabase.co/*)",
+      "Bash(mkdir *)",
+      "Bash(cd *)",
+      "Bash(taskkill *)",
+      "Bash(netstat *)",
+      "Bash(npm run build*)",
+      "Bash(ls *)",
+      "Bash(find *)",
+      "Bash(wc *)",
+      "Bash(curl -s -o /dev/null -w * http://localhost:*)",
+      "Bash(cat *)",
+      "Edit",
+      "Write"
+    ]
+  }
+}

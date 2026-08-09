@@ -1,5 +1,14 @@
 import type { MatchDto, MatchParticipant, MatchTimelineDto } from "./client";
 
+// Parse "Pseudo#TAG" en ses deux parties. Le tag est tout ce qui suit le
+// DERNIER "#" (un gameName peut lui-même contenir des "#").
+export function parseRiotId(raw: string): { gameName: string; tagLine: string } | null {
+  const trimmed = raw.trim();
+  const hashIndex = trimmed.lastIndexOf("#");
+  if (hashIndex <= 0 || hashIndex === trimmed.length - 1) return null;
+  return { gameName: trimmed.slice(0, hashIndex), tagLine: trimmed.slice(hashIndex + 1) };
+}
+
 // On n'affiche jamais l'ARAM ni les autres modes annexes : uniquement les
 // files "vraie game" (Normal Draft, SoloQ, Flex).
 export const QUEUE_NORMAL = 400;
@@ -62,4 +71,15 @@ export function deathsPer10Min(deaths: number, gameDurationSeconds: number): num
   if (gameDurationSeconds <= 0) return 0;
   const value = (deaths * 600) / gameDurationSeconds;
   return Math.round(value * 10) / 10;
+}
+
+// CS total en fin de game : déjà présent dans la réponse Match-V5 qu'on
+// récupère de toute façon (aucun appel API supplémentaire).
+export function totalCs(participant: MatchParticipant): number {
+  return participant.totalMinionsKilled + participant.neutralMinionsKilled;
+}
+
+export function csPerMin(cs: number, minutes: number): number {
+  if (minutes <= 0) return 0;
+  return Math.round((cs / minutes) * 10) / 10;
 }
