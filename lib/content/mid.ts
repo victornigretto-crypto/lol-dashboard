@@ -1,118 +1,163 @@
-// Bibliothèque de contenu pédagogique pour le rôle Mid, par palier de rang.
-// Seuls les paliers Iron→Emerald sont couverts pour l'instant (les rangs les
-// plus fréquents chez les joueurs qu'on coache) ; Diamant et au-dessus, ainsi
-// que les autres rôles (Top/Jungle/Bot/Support), affichent "en développement"
-// tant que leur contenu n'a pas été écrit.
+import type { Role, Tier, TierContent } from "./types";
 
-export type MidTier = "IRON" | "BRONZE" | "SILVER" | "GOLD" | "PLATINUM" | "EMERALD";
-
-export const MID_TIERS: MidTier[] = ["IRON", "BRONZE", "SILVER", "GOLD", "PLATINUM", "EMERALD"];
-
-// Seuils de CS/min utilisés pour situer une performance par rapport à son
-// propre palier plutôt que sur une échelle unique valable pour tout le monde.
-export type CsPerMinThresholds = {
-  poor: number; // en dessous : franchement à la traîne pour ce palier
-  average: number; // au-dessus : dans la moyenne du palier
-  good: number; // au-dessus : au-dessus du lot pour ce palier
+const FALLBACK: TierContent = {
+  inDevelopment: true,
+  focusIntro: "En cours de développement",
+  focusPoints: [],
+  highlightStats: [],
+  bucketThemes: {},
+  fieldQuestions: { lane: "Erreur en lane", fight: "Erreur en fight", macro: "Erreur de macro" },
+  csPerMinTarget: null,
+  deaths10Target: null,
 };
 
-export type MidTierContent = {
-  tier: MidTier;
-  // Texte court expliquant sur quoi se concentrer en priorité à ce palier.
-  focus: string;
-  // KPI à surligner dans l'analyse pour ce palier.
-  kpis: string[];
-  // Les 3 questions posées au joueur pour remplir error_lane/error_macro/error_fight.
-  questions: {
-    lane: string;
-    macro: string;
-    fight: string;
-  };
-  csPerMin: CsPerMinThresholds;
+const MID_CONTENT: Partial<Record<Tier, TierContent>> = {
+  iron: {
+    inDevelopment: false,
+    focusIntro: "En tant que joueur Iron, il faut que tu te concentres sur les points suivants :",
+    focusPoints: [
+      "La qualité de tes clics : beaucoup de joueurs Iron respectent mal la distance de sécurité à garder avec le vis-à-vis.",
+      "Le farm : tu dois viser plus de 7 CS/min, et ce toute la partie.",
+      "Les morts : tu dois mourir peu ! Push les waves, tape les tours, tout en protégeant ta vie.",
+    ],
+    highlightStats: ["csPre20", "csPost20", "deaths10"],
+    bucketThemes: { lane: "Placements & clics" },
+    fieldQuestions: {
+      lane: "Comment et pourquoi es-tu mort en lane ?",
+      fight: "Comment et pourquoi es-tu mort en fight ?",
+      macro: "As-tu détruit des tours ? Ou Aram mid ?",
+    },
+    csPerMinTarget: 7.0,
+    deaths10Target: 1.5, // PLACEHOLDER — à valider par Victor
+  },
+  bronze: {
+    inDevelopment: false,
+    focusIntro:
+      "En bronze, beaucoup de joueurs pensent que ce qui leur fait défaut, ce sont des concepts avancés, alors que souvent les bases ne sont pas maîtrisées :",
+    focusPoints: [
+      "Tu dois viser plus de 7.5 CS/min lors de toutes les phases de la partie.",
+      "Tu dois mourir peu, ne jamais feed ton adversaire.",
+      "Tu dois maîtriser les combos de ton champion : regarde un guide YouTube de ton champion et vérifie sur tes replays si tu fais les combos correctement.",
+    ],
+    highlightStats: ["csPre20", "csPost20", "deaths10"],
+    bucketThemes: { lane: "Qualité des combos" },
+    fieldQuestions: {
+      lane: "As-tu réussi tes combos ?",
+      fight: "Pourquoi et comment es-tu mort en fight ?",
+      macro: "As-tu cassé des tours ? Ou Aram mid ?",
+    },
+    csPerMinTarget: 7.5,
+    deaths10Target: 1.5, // PLACEHOLDER — à valider par Victor
+  },
+  silver: {
+    inDevelopment: false,
+    focusIntro: "En silver, il faut que tu commences à avoir une notion des matchups et de la macro :",
+    focusPoints: [
+      "Tu ne dois plus rater de combos.",
+      "Tu dois connaître le champion adverse et ne plus te laisser surprendre par son combo ou ses power spikes.",
+      "Tu dois commencer à jouer les objectifs.",
+    ],
+    highlightStats: ["deaths10"],
+    bucketThemes: { lane: "Morts ou combos ratés", macro: "Objectifs non joués" },
+    fieldQuestions: {
+      lane: "Es-tu mort en lane ? Pourquoi ?",
+      fight: "As-tu été pris sur un timing d'objectif ? Pourquoi ?",
+      macro: "As-tu oublié de jouer un objectif ? Lequel ?",
+    },
+    csPerMinTarget: 7.5, // PLACEHOLDER — à valider par Victor
+    deaths10Target: 1.3, // PLACEHOLDER — à valider par Victor
+  },
+  gold: {
+    inDevelopment: false,
+    focusIntro: "En gold, il faut que tu apprennes le 2v2 mid-jungle et que tu joues tous les objectifs :",
+    focusPoints: [
+      "Tu ne dois plus faire de morts inutiles.",
+      "Tu dois contester tous les objectifs en pushant ta lane avant.",
+      "Tu dois jouer sur le side de ton jungler et t'adapter à ses plays.",
+      "Tu dois side lane après 14 min et maintenir un farm haut en mid/end game.",
+    ],
+    highlightStats: ["deaths10", "csPost20"],
+    bucketThemes: { macro: "Objectifs non joués" },
+    fieldQuestions: {
+      lane: "Es-tu mort en lane ? Pourquoi ?",
+      fight: "As-tu contesté les objectifs ?",
+      macro: "As-tu side lane après 14 min ?",
+    },
+    csPerMinTarget: 8.0, // PLACEHOLDER — à valider par Victor
+    deaths10Target: 1.2, // PLACEHOLDER — à valider par Victor
+  },
+  platinum: {
+    inDevelopment: false,
+    focusIntro: "En platine, tu dois parfaire ton trading et ton wave management :",
+    focusPoints: [
+      "Analyse les patterns de trading pendant la champ select.",
+      "Ta connaissance des matchups doit s'affiner : tu ne dois plus taper les waves sans réfléchir.",
+      "Réfléchis toujours avant de taper la wave : tu dois avoir une stratégie de wave management.",
+      "Conteste tous les objectifs.",
+    ],
+    highlightStats: [],
+    bucketThemes: {
+      lane: "Faute de trading / Wave management",
+      fight: "Mort sur un timing objectif",
+      macro: "Objectifs non gagnés",
+    },
+    fieldQuestions: {
+      lane: "As-tu loupé un trade ? As-tu maîtrisé ton wave management ?",
+      fight: "Comment et pourquoi es-tu mort en fight ?",
+      macro: "Pourquoi as-tu loupé tes objectifs ?",
+    },
+    csPerMinTarget: 8.0, // PLACEHOLDER — à valider par Victor
+    deaths10Target: 1.1, // PLACEHOLDER — à valider par Victor
+  },
+  emerald: {
+    inDevelopment: false,
+    focusIntro:
+      "L'émeraude est la ligue de la macro et du fighting : ta compréhension du jeu doit aller plus loin que ta lane.",
+    focusPoints: [
+      "Joue ta game en fonction du scaling : si ta team scale, ralentis la partie ; sinon, accélère-la.",
+      "Joue toujours sur ton side qui gagne, ward-le et fight dessus.",
+      "Conteste la mid wave avant les objectifs et place-toi bien pour le fight.",
+      "Ne sabote plus de game : réfléchis au prochain objectif avant de perdre.",
+    ],
+    highlightStats: [],
+    bucketThemes: {
+      lane: "Mort d'un gank ou play weak side",
+      fight: "Mauvais placement ou absence",
+      macro: "Game throw",
+    },
+    fieldQuestions: {
+      lane: "Es-tu mort d'un gank ? Pourquoi ?",
+      fight: "Comment es-tu mort en fight ?",
+      macro: "As-tu throw ta game, ou failli la throw ? Comment ?",
+    },
+    csPerMinTarget: 8.5, // PLACEHOLDER — à valider par Victor
+    deaths10Target: 1.0, // PLACEHOLDER — à valider par Victor
+  },
 };
 
-const MID_CONTENT: Record<MidTier, MidTierContent> = {
-  IRON: {
-    tier: "IRON",
-    focus:
-      "La base avant tout : apprends à last-hit proprement et à rester en vie. Le reste (macro, roams) ne sert à rien si tu meurs pour rien en lane.",
-    kpis: ["CS/min avant 20", "Morts/10min", "Victoire/Défaite"],
-    questions: {
-      lane: "Combien de sbires as-tu manqués parce que tu étais occupé à harass/regarder la minimap ?",
-      macro: "As-tu quitté ta lane avant d'avoir un plan clair (objectif visible, allié ping, etc.) ?",
-      fight: "Es-tu mort en allant chercher un kill qui n'était pas nécessaire ?",
-    },
-    csPerMin: { poor: 4, average: 5, good: 6 },
-  },
-  BRONZE: {
-    tier: "BRONZE",
-    focus:
-      "Le farm commence à être correct : le prochain palier, c'est arrêter de mourir en solo sans raison et commencer à regarder ce qui se passe ailleurs sur la carte.",
-    kpis: ["CS/min avant 20", "Morts/10min", "Diversité de champions"],
-    questions: {
-      lane: "As-tu perdu du CS en repoussant ta wave au mauvais moment (avant un reset, avant une roam ennemie) ?",
-      macro: "As-tu regardé le score des autres lanes avant de décider de roam ou de push ?",
-      fight: "Le fight que tu as perdu, est-ce que tu avais l'avantage de sorts/summoners avant de t'engager ?",
-    },
-    csPerMin: { poor: 4.5, average: 5.5, good: 6.5 },
-  },
-  SILVER: {
-    tier: "SILVER",
-    focus:
-      "Ton farm est stable, mais tu perds encore des games sur des décisions de macro : freeze/push mal choisis, roams qui arrivent trop tard ou trop tôt.",
-    kpis: ["CS/min avant 20", "CS/min après 20", "Morts/10min"],
-    questions: {
-      lane: "As-tu correctement lu le state de lane (freeze/push/slow push) avant d'agir ?",
-      macro: "Ta roam a-t-elle changé quelque chose (kill, objectif, tempo), ou as-tu juste perdu du CS pour rien ?",
-      fight: "As-tu vérifié la vision/les cooldowns adverses avant de t'engager dans ce fight ?",
-    },
-    csPerMin: { poor: 5, average: 6, good: 7 },
-  },
-  GOLD: {
-    tier: "GOLD",
-    focus:
-      "Tu maîtrises les fondamentaux : le vrai levier de progression maintenant, c'est le mid-jungle synergy et la conversion des avantages en objectifs.",
-    kpis: ["CS/min après 20", "Morts/10min", "Winrate"],
-    questions: {
-      lane: "As-tu communiqué/joué avec ton jungler (invade, gank, contre-gank) plutôt que jouer ta lane isolée ?",
-      macro: "Ton avantage en lane s'est-il traduit en objectif (tour, dragon, herald) dans les 2 minutes qui ont suivi ?",
-      fight: "As-tu forcé un fight alors que ton équipe n'était pas groupée/prête ?",
-    },
-    csPerMin: { poor: 5.5, average: 6.5, good: 7.5 },
-  },
-  PLATINUM: {
-    tier: "PLATINUM",
-    focus:
-      "Le mécanique est solide : ce qui te bloque, c'est la prise de décision en late game (teamfights, split push, quand jouer safe vs. all-in).",
-    kpis: ["CS/min après 20", "Deaths en late game", "Diversité de champions"],
-    questions: {
-      lane: "As-tu adapté ton item build/rune en fonction du matchup et de la comp adverse ?",
-      macro: "As-tu correctement évalué si c'était le moment de grouper ou de split push ?",
-      fight: "Dans le teamfight décisif, as-tu joué ton rôle (peel, dive carry, poke) ou as-tu improvisé ?",
-    },
-    csPerMin: { poor: 6, average: 7, good: 8 },
-  },
-  EMERALD: {
-    tier: "EMERALD",
-    focus:
-      "Tu es proche du niveau où les détails font la différence : macro d'équipe, vision autour des objectifs, et consistance sur plusieurs games d'affilée.",
-    kpis: ["CS/min après 20", "Vision autour des objectifs", "Winrate sur les 10 dernières"],
-    questions: {
-      lane: "Ton pick de champion correspondait-il à ce que ta comp d'équipe avait besoin (dégâts, engage, peel) ?",
-      macro: "As-tu posé/nettoyé la vision autour des objectifs avant qu'ils ne spawn ?",
-      fight: "As-tu tilté après une mort et pris une décision impulsive juste après ?",
-    },
-    csPerMin: { poor: 6.5, average: 7.5, good: 8.5 },
-  },
-};
+// Convertit le tier brut de league-v4 (IRON, BRONZE, ... ; null/absent =
+// non classé) vers le type Tier utilisé par le contenu. Pas de mapping
+// existant dans lib/riot/rank.ts (uniquement des helpers de libellé/emblème),
+// donc défini ici plutôt que dupliqué.
+export function tierFromRiotTier(rawTier: string | null | undefined): Tier {
+  if (!rawTier) return "unranked";
+  const normalized = rawTier.toLowerCase();
+  const known: Tier[] = [
+    "iron",
+    "bronze",
+    "silver",
+    "gold",
+    "platinum",
+    "emerald",
+    "diamond",
+    "master",
+    "grandmaster",
+    "challenger",
+  ];
+  return (known as string[]).includes(normalized) ? (normalized as Tier) : "unranked";
+}
 
-// Renvoie le contenu pour un palier donné, ou null si ce palier n'est pas
-// encore couvert (Diamant+, ou toute valeur inconnue) : à afficher comme
-// "en développement" côté UI.
-export function getMidTierContent(tier: string): MidTierContent | null {
-  const normalized = tier.toUpperCase();
-  if ((MID_TIERS as string[]).includes(normalized)) {
-    return MID_CONTENT[normalized as MidTier];
-  }
-  return null;
+export function getContent(role: Role, tier: Tier): TierContent {
+  if (role !== "mid") return FALLBACK;
+  return MID_CONTENT[tier] ?? FALLBACK;
 }

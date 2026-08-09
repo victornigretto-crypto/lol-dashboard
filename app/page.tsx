@@ -3,7 +3,7 @@ import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { csClass, csPerMinClass, csPerMinThresholdsFor, deathsClass } from "@/lib/stats";
+import { csClass, deathsClass } from "@/lib/stats";
 import { rankEmblemUrl, rankLabel } from "@/lib/riot/rank";
 import { parseRiotId } from "@/lib/riot/transform";
 
@@ -129,29 +129,16 @@ function LoadingDots() {
 
 function GameRow({
   game,
-  tier,
   championIconUrl,
   formatGameDate,
 }: {
   game: RiotGame;
-  tier: string | null;
   championIconUrl: (champion: string) => string | null;
   formatGameDate: (iso: string) => string;
 }) {
   const win = game.result.toLowerCase().startsWith("v");
   const icon = championIconUrl(game.champion);
   const opponentIcon = game.matchup ? championIconUrl(game.matchup) : null;
-
-  // Ancien cache sans cs_final/game_duration_seconds (pré-Slice 3) : on
-  // retombe sur l'ancien badge CS@20 tant que la game n'est pas réimportée.
-  const hasCsPerMin = game.cs_final !== null && game.game_duration_seconds !== null;
-  const durationMinutes = hasCsPerMin ? (game.game_duration_seconds as number) / 60 : 0;
-  const csPerMinPre20 = hasCsPerMin ? Math.round((game.cs20 / Math.min(20, durationMinutes)) * 10) / 10 : 0;
-  const csPerMinPost20 =
-    hasCsPerMin && durationMinutes > 20
-      ? Math.round((((game.cs_final as number) - game.cs20) / (durationMinutes - 20)) * 10) / 10
-      : null;
-  const thresholds = csPerMinThresholdsFor(game.lane, tier);
 
   return (
     <div
@@ -198,28 +185,10 @@ function GameRow({
       <p className={"w-16 text-center text-sm font-semibold " + (win ? "text-green-400" : "text-red-400")}>
         {win ? "Victoire" : "Défaite"}
       </p>
-      {hasCsPerMin ? (
-        <>
-          <div className={"hidden w-16 rounded px-1 py-0.5 text-center text-sm sm:block " + csPerMinClass(csPerMinPre20, thresholds)}>
-            <p className="text-[10px] opacity-80">CS/min &lt;20</p>
-            <p>{csPerMinPre20}</p>
-          </div>
-          <div
-            className={
-              "hidden w-16 rounded px-1 py-0.5 text-center text-sm sm:block " +
-              (csPerMinPost20 !== null ? csPerMinClass(csPerMinPost20, thresholds) : "bg-slate-800 text-slate-500")
-            }
-          >
-            <p className="text-[10px] opacity-80">CS/min &gt;20</p>
-            <p>{csPerMinPost20 ?? "—"}</p>
-          </div>
-        </>
-      ) : (
-        <div className={"hidden w-16 rounded px-1 py-0.5 text-center text-sm sm:block " + csClass(game.cs20)}>
-          <p className="text-[10px] opacity-80">CS@20</p>
-          <p>{game.cs20}</p>
-        </div>
-      )}
+      <div className={"hidden w-16 rounded px-1 py-0.5 text-center text-sm sm:block " + csClass(game.cs20)}>
+        <p className="text-[10px] opacity-80">CS@20</p>
+        <p>{game.cs20}</p>
+      </div>
       <div className={"hidden w-20 rounded px-1 py-0.5 text-center text-sm sm:block " + deathsClass(game.deaths10)}>
         <p className="text-[10px] opacity-80">Morts/10m</p>
         <p>{game.deaths10}</p>
@@ -559,7 +528,7 @@ export default function Home() {
                   ) : (
                     <>
                       {recentGames.map((game) => (
-                        <GameRow key={game.riot_match_id} game={game} tier={rank?.tier ?? null} championIconUrl={championIconUrl} formatGameDate={formatGameDate} />
+                        <GameRow key={game.riot_match_id} game={game} championIconUrl={championIconUrl} formatGameDate={formatGameDate} />
                       ))}
                       {recentGames.length === 0 && olderGames.length > 0 && (
                         <p className="text-center text-slate-400">Aucune game de moins de 2 mois pour ce filtre.</p>
@@ -576,7 +545,7 @@ export default function Home() {
                       )}
                       {showOlder &&
                         olderGames.map((game) => (
-                          <GameRow key={game.riot_match_id} game={game} tier={rank?.tier ?? null} championIconUrl={championIconUrl} formatGameDate={formatGameDate} />
+                          <GameRow key={game.riot_match_id} game={game} championIconUrl={championIconUrl} formatGameDate={formatGameDate} />
                         ))}
                     </>
                   )}
