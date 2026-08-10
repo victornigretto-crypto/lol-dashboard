@@ -105,6 +105,19 @@ décision de Victor, pas une décision de code.
   rajouter le `.ts` que TypeScript omet). Ça permet d'exécuter le **vrai** `lib/stats.ts`
   plutôt qu'une copie. Script jetable, à garder hors du dépôt.
 
+**Mise en place de ce fichier.** Le contexte se reperdait entre deux sessions. `MEMOIRE.md`
+est né en fin de session, et [AGENTS.md](AGENTS.md) renvoie dessus — comme ce fichier-là est
+chargé automatiquement au démarrage, la consigne « lis puis mets à jour » arrive seule, sans
+que Victor ait à la redonner.
+
+**Git.** 7 commits poussés sur `origin/master` : les 2 de cette session
+(`0a95fea` les deux fixes, `845c6fa` ce fichier) **plus 5 commits d'avance qui n'avaient
+jamais été poussés** (Slices 3, 4, 5, Refactos A et C). Local et GitHub sont désormais
+synchronisés. Vérifié avant de pousser : aucune clé Riot dans l'historique, `.env.local`
+bien ignoré.
+*Convention de messages :* français **sans accents**, titre court + corps détaillé +
+trailer `Co-Authored-By`. S'y tenir.
+
 ---
 
 ## Reste à faire
