@@ -32,13 +32,30 @@ gratuite et sans compte ; le suivi dans la durée demande un compte.
 /rejoindre   écran de motivation 2/2 — la réponse + la contrepartie
 /login       création de compte (?mode=signup)
 /onboarding  liaison du compte Riot + rang + rôles + pyramide + focus du palier
-/suivi       le cockpit : les games + les 3 champs d'erreurs à remplir
+/suivi       le cockpit : bandeau (Riot ID + rang + changement de profil),
+             les games et les 3 champs d'erreurs à remplir
 ```
+
+> ### ⚠ Action requise avant que `/suivi` fonctionne
+> La colonne `games.puuid` a été ajoutée à [supabase/schema.sql](supabase/schema.sql) le
+> 2026-08-10 mais **la migration doit être lancée à la main** par Victor dans Supabase →
+> SQL Editor. Sans elle, le cockpit renvoie une erreur (le code demande une colonne qui
+> n'existe pas).
+> ```sql
+> alter table public.games add column if not exists puuid text;
+> ```
+> **Si une session démarre sur un bug de `/suivi`, vérifier ça en premier.**
+> Statut au moment d'écrire ces lignes : **inconnu, pas confirmé par Victor.**
 
 **Ce qui marche, vérifié en session :** import Riot de bout en bout (compte → 20 games →
 rang), cache en base, garde-fou anti-pollution, auth Supabase complète (login / signup /
 reset / confirmation), les couleurs relatives au palier. `tsc --noEmit` et `npm run build`
 passent.
+
+**Vérifié seulement par le code, pas en vrai** (demande une session connectée, donc à
+confirmer avec Victor) : la suppression des données à l'ancien profil lors d'un changement
+de compte, et le fait que les notes écrites à la main survivent au réimport (l'upsert ne
+liste pas ces colonnes, elles devraient donc être préservées).
 
 **Le trou principal :** le contenu pédagogique n'existe **que pour le rôle mid**, et
 seulement de **iron à emerald**. Tout le reste tombe sur `FALLBACK_CONTENT`
@@ -94,6 +111,11 @@ dans une `<iframe>` de la largeur voulue et lire `documentElement.scrollWidth` d
 
 **Pas encore vérifié en vrai :** la suppression elle-même, qui demande une session
 connectée. À confirmer par Victor.
+
+**Poussé sur `origin/master`** à la demande de Victor, sans attendre sa vérification — il a
+tranché après que le risque lui a été signalé. Donc : le code sur `master` suppose la
+migration `games.puuid` faite. **Première question à poser en début de session suivante :
+est-ce que la migration est passée, et est-ce que le changement de profil marche ?**
 
 ---
 
