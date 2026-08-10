@@ -137,6 +137,22 @@ const MID_CONTENT: Partial<Record<Tier, TierContent>> = {
   },
 };
 
+// Paliers classés, du plus bas au plus haut. Source unique : sert à la fois
+// de table de conversion pour `tierFromRiotTier` et d'ordre d'affichage
+// (pyramide de l'onboarding, voisins n-1 / n+1).
+export const RANKED_TIERS: Tier[] = [
+  "iron",
+  "bronze",
+  "silver",
+  "gold",
+  "platinum",
+  "emerald",
+  "diamond",
+  "master",
+  "grandmaster",
+  "challenger",
+];
+
 // Convertit le tier brut de league-v4 (IRON, BRONZE, ... ; null/absent =
 // non classé) vers le type Tier utilisé par le contenu. Pas de mapping
 // existant dans lib/riot/rank.ts (uniquement des helpers de libellé/emblème),
@@ -144,19 +160,7 @@ const MID_CONTENT: Partial<Record<Tier, TierContent>> = {
 export function tierFromRiotTier(rawTier: string | null | undefined): Tier {
   if (!rawTier) return "unranked";
   const normalized = rawTier.toLowerCase();
-  const known: Tier[] = [
-    "iron",
-    "bronze",
-    "silver",
-    "gold",
-    "platinum",
-    "emerald",
-    "diamond",
-    "master",
-    "grandmaster",
-    "challenger",
-  ];
-  return (known as string[]).includes(normalized) ? (normalized as Tier) : "unranked";
+  return (RANKED_TIERS as string[]).includes(normalized) ? (normalized as Tier) : "unranked";
 }
 
 export function getContent(role: Role, tier: Tier): TierContent {
