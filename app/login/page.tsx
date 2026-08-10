@@ -27,7 +27,7 @@ function LoginForm() {
   const [needsConfirmation, setNeedsConfirmation] = useState(false);
   const [resendLoading, setResendLoading] = useState(false);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.SubmitEvent<HTMLFormElement>) => {
     e.preventDefault();
     setError(null);
     setInfo(null);
@@ -50,10 +50,18 @@ function LoginForm() {
       router.push("/");
       router.refresh();
     } else if (mode === "signup") {
-      const { error } = await supabase.auth.signUp({ email, password });
+      const { data, error } = await supabase.auth.signUp({ email, password });
       setLoading(false);
       if (error) {
         setError(error.message);
+        return;
+      }
+      // Si la confirmation d'email est désactivée côté Supabase, signUp ouvre
+      // déjà une session : on enchaîne sans faire retaper quoi que ce soit.
+      // "/" redirige alors vers l'onboarding, qui liera le Riot ID déjà saisi.
+      if (data.session) {
+        router.push("/");
+        router.refresh();
         return;
       }
       setInfo("Compte créé. Vérifie tes emails pour confirmer ton adresse, puis connecte-toi.");

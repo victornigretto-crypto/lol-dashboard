@@ -11,9 +11,18 @@ import {
   deaths10Band,
   deaths10Class,
 } from "@/lib/stats";
-import { dominantRole, getContent, tierFromRiotTier } from "@/lib/content";
+import {
+  dominantRole,
+  FALLBACK_CONTENT,
+  getContent,
+  tierFromRiotTier,
+  type StatKey,
+  type TierContent,
+} from "@/lib/content";
+import { championIconUrl, useDdragonVersion } from "@/lib/ddragon";
+import { rememberRiotId } from "@/lib/pendingRiotId";
 import { rankEmblemUrl, rankLabel } from "@/lib/riot/rank";
-import { parseRiotId } from "@/lib/riot/transform";
+import { formatGameDate, parseRiotId } from "@/lib/riot/transform";
 
 type RiotGame = {
   riot_match_id: string;
@@ -49,16 +58,26 @@ type SearchResult = {
 // rôle sans contenu défini : on n'affiche alors aucun jugement de couleur.
 type Targets = { csPerMin: number | null; deaths10: number | null };
 
-const NO_TARGETS: Targets = { csPerMin: null, deaths10: null };
-
 // Le compte analysé n'a pas de profil en base (analyse éphémère) : son rôle
 // se déduit de la lane la plus jouée sur les games récupérées, et son palier
-// du tier league-v4 renvoyé par l'import.
-function resolveTargets(games: RiotGame[], rank: Rank | null): Targets {
+// du tier league-v4 renvoyé par l'import. Rôle indéterminable : contenu de
+// repli, donc ni cible ni surlignage.
+function resolveContent(games: RiotGame[], rank: Rank | null): TierContent {
   const role = dominantRole(games.map((g) => g.lane));
-  if (!role) return NO_TARGETS;
-  const content = getContent(role, tierFromRiotTier(rank?.tier));
+  if (!role) return FALLBACK_CONTENT;
+  return getContent(role, tierFromRiotTier(rank?.tier));
+}
+
+function targetsOf(content: TierContent): Targets {
   return { csPerMin: content.csPerMinTarget, deaths10: content.deaths10Target };
+}
+
+// Une colonne mise en avant par le contenu du palier reçoit un liseré : c'est
+// la stat sur laquelle ce palier doit se concentrer en priorité.
+const HIGHLIGHT_RING = " ring-2 ring-blue-400";
+
+function highlight(content: TierContent, stat: StatKey): string {
+  return content.highlightStats.includes(stat) ? HIGHLIGHT_RING : "";
 }
 
 type Severity = "red" | "yellow" | "green";
@@ -166,17 +185,17 @@ function LoadingDots() {
 function GameRow({
   game,
   targets,
-  championIconUrl,
-  formatGameDate,
+  content,
+  ddragonVersion,
 }: {
   game: RiotGame;
   targets: Targets;
-  championIconUrl: (champion: string) => string | null;
-  formatGameDate: (iso: string) => string;
+  content: TierContent;
+  ddragonVersion: string | null;
 }) {
   const win = game.result.toLowerCase().startsWith("v");
-  const icon = championIconUrl(game.champion);
-  const opponentIcon = game.matchup ? championIconUrl(game.matchup) : null;
+  const icon = championIconUrl(ddragonVersion, game.champion);
+  const opponentIcon = championIconUrl(ddragonVersion, game.matchup);
   const { perMinPre20, perMinPost20 } = csMetrics(game);
 
   return (
@@ -224,15 +243,33 @@ function GameRow({
       <p className={"w-16 text-center text-sm font-semibold " + (win ? "text-green-400" : "text-red-400")}>
         {win ? "Victoire" : "Défaite"}
       </p>
-      <div className={"hidden w-20 rounded px-1 py-0.5 text-center text-sm sm:block " + csPerMinClass(perMinPre20, targets.csPerMin)}>
+      <div
+        className={
+          "hidden w-20 rounded px-1 py-0.5 text-center text-sm sm:block " +
+          csPerMinClass(perMinPre20, targets.csPerMin) +
+          highlight(content, "csPre20")
+        }
+      >
         <p className="text-[10px] leading-tight opacity-80">CS/min à 20min</p>
         <p>{perMinPre20 ?? "—"}</p>
       </div>
-      <div className={"hidden w-20 rounded px-1 py-0.5 text-center text-sm sm:block " + csPerMinClass(perMinPost20, targets.csPerMin)}>
+      <div
+        className={
+          "hidden w-20 rounded px-1 py-0.5 text-center text-sm sm:block " +
+          csPerMinClass(perMinPost20, targets.csPerMin) +
+          highlight(content, "csPost20")
+        }
+      >
         <p className="text-[10px] leading-tight opacity-80">CS/min après 20min</p>
         <p>{perMinPost20 ?? "—"}</p>
       </div>
-      <div className={"hidden w-20 rounded px-1 py-0.5 text-center text-sm sm:block " + deaths10Class(game.deaths10, targets.deaths10)}>
+      <div
+        className={
+          "hidden w-20 rounded px-1 py-0.5 text-center text-sm sm:block " +
+          deaths10Class(game.deaths10, targets.deaths10) +
+          highlight(content, "deaths10")
+        }
+      >
         <p className="text-[10px] leading-tight opacity-80">Morts/10m</p>
         <p>{game.deaths10}</p>
       </div>
@@ -251,7 +288,7 @@ export default function Home() {
   const [games, setGames] = useState<RiotGame[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [ddragonVersion, setDdragonVersion] = useState<string | null>(null);
+  const ddragonVersion = useDdragonVersion();
 
   const [analyzing, setAnalyzing] = useState(false);
   const [analyzeError, setAnalyzeError] = useState<string | null>(null);
@@ -291,13 +328,6 @@ export default function Home() {
     };
   }, [supabase, router]);
 
-  useEffect(() => {
-    fetch("https://ddragon.leagueoflegends.com/api/versions.json")
-      .then((r) => r.json())
-      .then((versions: string[]) => setDdragonVersion(versions[0] ?? null))
-      .catch(() => setDdragonVersion(null));
-  }, []);
-
   const search = async (riotId: string, chosenFilter: Filter): Promise<SearchResult | null> => {
     setLoading(true);
     setError(null);
@@ -317,7 +347,7 @@ export default function Home() {
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.SubmitEvent<HTMLFormElement>) => {
     e.preventDefault();
     const parsed = parseRiotId(riotIdInput);
     if (!parsed) {
@@ -325,6 +355,9 @@ export default function Home() {
       return;
     }
     const riotId = `${parsed.gameName}#${parsed.tagLine}`;
+    // Mémorisé dès la saisie : si le visiteur va au bout du pont et crée un
+    // compte, l'onboarding liera ce Riot ID sans le lui redemander.
+    rememberRiotId(riotId);
     // La recherche initiale est déjà filtrée sur "soloq" : on réutilise son
     // résultat (games ET rang) pour le winrate et les cibles de palier au
     // lieu de le redemander à l'API.
@@ -373,7 +406,7 @@ export default function Home() {
     setBanners([]);
     setTiltAlert(false);
 
-    const targets = resolveTargets(initial.games, initial.rank);
+    const targets = targetsOf(resolveContent(initial.games, initial.rank));
 
     const onFail = (err: unknown) => {
       setAnalyzeError(err instanceof Error ? err.message : "Analyse impossible (réseau).");
@@ -400,15 +433,10 @@ export default function Home() {
     setAnalyzing(false);
   };
 
-  const championIconUrl = (champion: string) =>
-    ddragonVersion ? `https://ddragon.leagueoflegends.com/cdn/${ddragonVersion}/img/champion/${champion}.png` : null;
-
-  const formatGameDate = (iso: string) =>
-    new Date(iso).toLocaleDateString("fr-FR", { day: "2-digit", month: "short" });
-
   const recentGames = games.filter((g) => isRecent(g.played_at));
   const olderGames = games.filter((g) => !isRecent(g.played_at));
-  const targets = resolveTargets(games, rank);
+  const content = resolveContent(games, rank);
+  const targets = targetsOf(content);
 
   if (checkingSession) {
     return (
@@ -512,19 +540,20 @@ export default function Home() {
                 )}
               </aside>
 
-              <div className="rounded-2xl border border-blue-500/40 bg-blue-500/10 p-4 text-center md:text-left">
-                <p className="text-sm font-semibold text-blue-300">Envie de suivre ta progression ?</p>
-                <p className="mt-1 text-sm text-slate-300">
-                  Crée un compte gratuit pour garder l&apos;historique de tes games et ton propre cockpit, sans
-                  tout retaper à chaque fois.
-                </p>
-                <Link
-                  href="/decouvrir"
-                  className="mt-3 inline-block rounded-full bg-blue-600 px-4 py-2 text-sm font-semibold hover:bg-blue-500"
-                >
-                  Découvrir
-                </Link>
-              </div>
+              {!content.inDevelopment && (
+                <div className="rounded-2xl border border-slate-700 bg-slate-900/60 p-4">
+                  <h2 className="text-lg font-semibold text-slate-200">Sur quoi progresser</h2>
+                  <p className="mt-2 text-sm text-slate-300">{content.focusIntro}</p>
+                  <ul className="mt-3 flex flex-col gap-2">
+                    {content.focusPoints.map((point) => (
+                      <li key={point} className="flex items-start gap-2 text-sm text-slate-300">
+                        <span className="mt-0.5 shrink-0 text-blue-400">→</span>
+                        <span>{point}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </div>
 
             <div className="flex flex-col gap-6">
@@ -576,7 +605,7 @@ export default function Home() {
                   ) : (
                     <>
                       {recentGames.map((game) => (
-                        <GameRow key={game.riot_match_id} game={game} targets={targets} championIconUrl={championIconUrl} formatGameDate={formatGameDate} />
+                        <GameRow key={game.riot_match_id} game={game} targets={targets} content={content} ddragonVersion={ddragonVersion} />
                       ))}
                       {recentGames.length === 0 && olderGames.length > 0 && (
                         <p className="text-center text-slate-400">Aucune game de moins de 2 mois pour ce filtre.</p>
@@ -593,13 +622,27 @@ export default function Home() {
                       )}
                       {showOlder &&
                         olderGames.map((game) => (
-                          <GameRow key={game.riot_match_id} game={game} targets={targets} championIconUrl={championIconUrl} formatGameDate={formatGameDate} />
+                          <GameRow key={game.riot_match_id} game={game} targets={targets} content={content} ddragonVersion={ddragonVersion} />
                         ))}
                     </>
                   )}
                 </div>
               </div>
             </div>
+          </div>
+
+          {/* Pont vers le compte : proposé seulement une fois la valeur
+              livrée, jamais avant l'analyse. */}
+          <div className="mt-10 flex flex-col items-center gap-3 rounded-2xl border border-blue-500/40 bg-blue-500/10 px-4 py-8 text-center">
+            <p className="text-lg font-semibold text-slate-100">
+              Ton analyse s&apos;arrête là. Ta progression, non.
+            </p>
+            <Link
+              href="/decouvrir"
+              className="rounded-full bg-blue-600 px-8 py-3 font-semibold text-white transition hover:bg-blue-500"
+            >
+              Je veux progresser →
+            </Link>
           </div>
         </div>
       )}

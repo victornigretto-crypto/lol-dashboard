@@ -1,6 +1,8 @@
 import type { Role, Tier, TierContent } from "./types";
 
-const FALLBACK: TierContent = {
+// Contenu servi dès qu'un couple (rôle, palier) n'est pas encore écrit :
+// libellés génériques, aucune cible, donc aucune couleur ni surlignage.
+export const FALLBACK_CONTENT: TierContent = {
   inDevelopment: true,
   focusIntro: "En cours de développement",
   focusPoints: [],
@@ -158,6 +160,6 @@ export function tierFromRiotTier(rawTier: string | null | undefined): Tier {
 }
 
 export function getContent(role: Role, tier: Tier): TierContent {
-  if (role !== "mid") return FALLBACK;
-  return MID_CONTENT[tier] ?? FALLBACK;
+  if (role !== "mid") return FALLBACK_CONTENT;
+  return MID_CONTENT[tier] ?? FALLBACK_CONTENT;
 }

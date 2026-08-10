@@ -83,3 +83,11 @@ export function csPerMin(cs: number, minutes: number): number {
   if (minutes <= 0) return 0;
   return Math.round((cs / minutes) * 10) / 10;
 }
+
+// Date courte d'une game, au même format sur l'analyse publique et le
+// cockpit. `played_at` peut être null pour une game importée avant que la
+// colonne existe.
+export function formatGameDate(iso: string | null): string {
+  if (!iso) return "";
+  return new Date(iso).toLocaleDateString("fr-FR", { day: "2-digit", month: "short" });
+}

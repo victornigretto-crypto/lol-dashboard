@@ -3,7 +3,7 @@
 import type { Role } from "./types";
 
 export * from "./types";
-export { getContent, tierFromRiotTier } from "./mid";
+export { FALLBACK_CONTENT, getContent, tierFromRiotTier } from "./mid";
 
 // `laneLabel` (lib/riot/transform) et `profiles.primary_role` stockent des
 // libellés d'affichage ("Mid", "Bot"...). Le contenu, lui, est indexé par

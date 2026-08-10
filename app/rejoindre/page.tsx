@@ -1,45 +1,20 @@
-import Link from "next/link";
+import { MotivationScreen } from "@/app/_components/MotivationScreen";
 
-// Page de motivation 2/2 (Slice 4) : le "comment ça marche" concret, avant
-// de pousser vers l'inscription elle-même (compte créé APRÈS la valeur,
-// jamais avant).
+// Écran de motivation 2/2 : la réponse au problème posé par /decouvrir, y
+// compris la contrepartie. "C'est parti" est le premier moment où on demande
+// un compte — la valeur a déjà été livrée.
 export default function RejoindrePage() {
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center bg-slate-950 px-4 py-16 text-center text-slate-100">
-      <div className="max-w-xl">
-        <p className="text-sm uppercase tracking-[0.3em] text-blue-400">GG Dashboard</p>
-        <h1 className="mt-4 text-4xl font-bold tracking-tight">Comment ça marche</h1>
-        <p className="mt-6 text-lg text-slate-300">
-          Trois étapes, deux minutes, aucune carte bancaire.
-        </p>
-
-        <ol className="mt-8 flex flex-col gap-3 text-left text-slate-300">
-          <li className="flex items-start gap-3 rounded-xl border border-slate-700 bg-slate-900/60 p-4">
-            <span className="font-bold text-blue-400">1</span>
-            <span>Tu crées ton compte avec ton email.</span>
-          </li>
-          <li className="flex items-start gap-3 rounded-xl border border-slate-700 bg-slate-900/60 p-4">
-            <span className="font-bold text-blue-400">2</span>
-            <span>Tu lies ton compte Riot une seule fois — plus besoin de le retaper ensuite.</span>
-          </li>
-          <li className="flex items-start gap-3 rounded-xl border border-slate-700 bg-slate-900/60 p-4">
-            <span className="font-bold text-blue-400">3</span>
-            <span>Ton cockpit se remplit automatiquement à chaque game, prêt à être annoté.</span>
-          </li>
-        </ol>
-
-        <Link
-          href="/login?mode=signup"
-          className="mt-10 inline-block rounded-full bg-blue-600 px-8 py-3 font-semibold text-white hover:bg-blue-500"
-        >
-          Créer mon compte
-        </Link>
-        <p className="mt-4">
-          <Link href="/decouvrir" className="text-sm text-slate-500 underline hover:text-slate-300">
-            Retour
-          </Link>
-        </p>
-      </div>
-    </main>
+    <MotivationScreen
+      title="Comment GG Dashboard va t'aider à progresser"
+      points={[
+        "GG Dashboard te dit sur quoi progresser en fonction de ta ligue et de ton classement",
+        "GG Dashboard repère tes faiblesses et tes erreurs récurrentes",
+        "Par contre : tu vas devoir t'investir. Remplis GG Dashboard après chacune de tes soloQ.",
+      ]}
+      cta="C'est parti"
+      href="/login?mode=signup"
+      back={{ label: "Retour", href: "/decouvrir" }}
+    />
   );
 }

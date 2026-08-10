@@ -3,6 +3,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { parseRiotId } from "@/lib/riot/transform";
+import { clearPendingRiotId, readPendingRiotId } from "@/lib/pendingRiotId";
 import { rankEmblemUrl, tierLabel } from "@/lib/riot/rank";
 
 // Paliers affichés dans la pyramide, du plus bas au plus haut. Diamant+ n'a
@@ -52,8 +53,10 @@ export default function OnboardingPage() {
   const [revealed, setRevealed] = useState(false);
   const hasAnimated = useRef(false);
 
-  // Pré-remplit le Riot ID si un compte est déjà lié (ex : onboarding
-  // interrompu avant la fin) pour éviter de le retaper.
+  // Le compte se crée APRÈS l'analyse gratuite (Slice 4) : le Riot ID a donc
+  // déjà été saisi sur l'accueil. On le lie automatiquement ici, sans le
+  // redemander. Le formulaire manuel ne sert plus que de repli (analyse
+  // sautée, stockage local indisponible, liaison en échec).
   useEffect(() => {
     let active = true;
     (async () => {
@@ -70,7 +73,23 @@ export default function OnboardingPage() {
         .eq("user_id", user.id)
         .maybeSingle();
       if (!active) return;
-      if (profile?.riot_id) setRiotIdInput(profile.riot_id);
+
+      const pending = readPendingRiotId();
+      const known = profile?.riot_id ?? pending;
+      if (known) setRiotIdInput(known);
+
+      // Déjà lié (onboarding repris en cours de route) : rien à refaire.
+      if (!profile?.riot_id && pending) {
+        try {
+          const result = await linkAccount(pending);
+          if (!active) return;
+          clearPendingRiotId();
+          setLinked(result);
+        } catch {
+          // Le formulaire manuel prend le relais, pré-rempli avec `pending`.
+        }
+      }
+      if (!active) return;
       setLoadingProfile(false);
     })();
     return () => {
@@ -85,7 +104,7 @@ export default function OnboardingPage() {
     return () => clearTimeout(timer);
   }, [linked]);
 
-  const handleLink = async (e: React.FormEvent) => {
+  const handleLink = async (e: React.SubmitEvent<HTMLFormElement>) => {
     e.preventDefault();
     const parsed = parseRiotId(riotIdInput);
     if (!parsed) {
@@ -96,6 +115,7 @@ export default function OnboardingPage() {
     setLinkError(null);
     try {
       const result = await linkAccount(`${parsed.gameName}#${parsed.tagLine}`);
+      clearPendingRiotId();
       setLinked(result);
     } catch (err) {
       setLinkError(err instanceof Error ? err.message : "Liaison impossible (réseau).");
