@@ -88,3 +88,11 @@ create policy "profiles_update_own" on public.profiles
 -- réimportées.
 alter table public.games add column if not exists cs_final numeric;
 alter table public.games add column if not exists game_duration_seconds numeric;
+
+-- De QUEL compte Riot vient cette game. `user_id` seul ne suffit pas : un user
+-- peut relier son compte GG Dashboard a un autre Riot ID (profiles.puuid est
+-- ecrase a chaque liaison), et les games des deux comptes s'empilaient alors
+-- sous le meme user_id sans rien pour les distinguer -- le cockpit affichait un
+-- melange. Nullable : les games importees avant cette colonne restent en base
+-- mais ne s'affichent plus, jusqu'a ce qu'un reimport les reetiquette.
+alter table public.games add column if not exists puuid text;

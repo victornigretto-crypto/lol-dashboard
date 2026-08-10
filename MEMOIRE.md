@@ -48,7 +48,65 @@ seulement de **iron à emerald**. Tout le reste tombe sur `FALLBACK_CONTENT`
 
 ## Journal des sessions
 
-### 2026-08-10 — Audit complet + fix du CS/min et de la perf du filtre « all »
+### 2026-08-10 (2) — Profil mélangé + CS après 20 min jamais affiché
+
+**Symptômes rapportés :** en se connectant sur `grosgalio`, le cockpit montrait un mix des
+profils `cartem#euwww` et `chopin opus 52#1849`. Et le CS/min après 20 min ne s'affichait
+jamais.
+
+**Ce que ce n'était PAS.** Premier réflexe : une fuite RLS entre utilisateurs. Vérifié par
+une requête anonyme sur `games` et `profiles` avec la clé anon → `[]` dans les deux cas.
+RLS est bien actif et la politique `auth.uid() = user_id` fonctionne. **À refaire en premier
+si un doute de fuite revient**, c'est un test décisif et non destructif :
+
+```bash
+curl -sS "$URL/rest/v1/games?select=riot_match_id&limit=5" \
+  -H "apikey: $ANON" -H "Authorization: Bearer $ANON"   # doit renvoyer []
+```
+
+**Cause 1 — le mélange.** `games` ne retenait pas de quel compte Riot venait chaque ligne :
+seulement `user_id`. Or `profiles` ne garde **qu'un** `puuid`, écrasé à chaque liaison. Un
+user qui relie un autre Riot ID empile donc les games des deux comptes sous le même
+`user_id`, indiscernables — et `/suivi` faisait `select("*")` sans filtre de compte, pendant
+que l'en-tête (rang + rôle) venait du compte courant. D'où le « mix ».
+Le garde-fou anti-pollution ne couvrait que l'import d'un compte *non lié* ; pas le
+changement de compte lié.
+
+**Cause 2 — l'après-20.** Deux verrous cumulés : la condition d'acceptation du cache ne
+vérifiait pas `cs_final` / `game_duration_seconds`, donc les games importées avant la
+Slice 3 étaient resservies avec leurs `null` ; et `ignoreDuplicates: true` empêchait tout
+upsert de les réparer. Sans ces deux colonnes `csMetrics` ne peut pas calculer l'après-20 →
+« — » définitif. Le commentaire du code disait « tant qu'elles ne sont pas réimportées »…
+mais **rien ne déclenchait jamais ce réimport**. D'où « jamais » et pas « parfois ».
+
+**Ce qui a été changé :**
+
+- `supabase/schema.sql` : `alter table public.games add column if not exists puuid text;`
+- `app/api/riot/import/route.ts` : le cache se lit par `(user_id, puuid)` ; nouvelle
+  fonction `isComplete` — une ligne incomplète est traitée comme absente du cache donc
+  retéléchargée ; `ignoreDuplicates: false` pour que l'upsert répare les lignes existantes ;
+  le `puuid` est écrit sur chaque ligne. Le `puuid` **n'est pas** dans le type `Row`, donc
+  il ne part jamais vers le navigateur (vérifié).
+- `app/suivi/page.tsx` : le cockpit filtre sur `profile.puuid`.
+
+**Décision de Victor :** les games antérieures aux 20 dernières garderont `puuid = null` et
+resteront **masquées, pas supprimées**. Un backfill exact aurait demandé un appel Riot par
+game pour savoir à quel compte elle appartient ; les tagger en masse avec le puuid courant
+aurait attribué les games de cartem à chopin — remplacer un mélange par un mensonge.
+
+**Mécanique d'auto-réparation à comprendre :** le filtre `.eq("puuid", puuid)` fait que les
+anciennes lignes (puuid null) ratent le cache → elles sont retéléchargées → l'upsert les met
+à jour avec `cs_final`, la durée **et** le `puuid`. Les deux bugs se réparent donc d'eux-mêmes
+au premier chargement du cockpit, sur les 20 dernières SoloQ.
+
+**Limite connue, laissée volontairement :** la contrainte d'unicité reste
+`(user_id, riot_match_id)`. Si deux comptes Riot reliés au même login ont joué **la même
+partie**, leurs deux lignes se marcheraient dessus. Rare, et déjà cassé avant — pas élargi
+le périmètre pour ça.
+
+---
+
+### 2026-08-10 (1) — Audit complet + fix du CS/min et de la perf du filtre « all »
 
 **Contexte :** demande d'audit — lancer l'app, relire le code, lister ce qui est
 inachevé ou en suspens. Puis go sur deux bugs.
@@ -152,6 +210,9 @@ Classé par ce que ça rapporte, pas par difficulté.
       - `wins` / `losses` — remontés par les deux routes API jusqu'au state React, jamais affichés.
 - [ ] **`/suivi` ne vérifie pas `onboarded_at`** — un user connecté mais pas onboardé qui
       va directement sur `/suivi` passe. Seul `/` fait l'aiguillage.
+- [ ] **Contrainte d'unicité de `games`** encore sur `(user_id, riot_match_id)` : deux
+      comptes Riot reliés au même login et présents dans la même partie se marcheraient
+      dessus. Le bon couple serait `(user_id, puuid, riot_match_id)`.
 - [ ] **`/suivi` charge toutes les games** (`select("*")` sans limite). OK aujourd'hui,
       plus dans six mois.
 - [ ] **Spinner de recherche manquant** sur le flux principal. `LoadingDots` existe déjà

@@ -108,7 +108,7 @@ export default function SuiviPage() {
 
       const { data: profile } = await supabase
         .from("profiles")
-        .select("riot_id, primary_role, former_rank")
+        .select("puuid, riot_id, primary_role, former_rank")
         .eq("user_id", user?.id ?? "")
         .maybeSingle();
       if (!active) return;
@@ -141,16 +141,25 @@ export default function SuiviPage() {
         setContent(getContent(role, tierFromRiotTier(currentRank?.tier ?? profile?.former_rank)));
       }
 
-      const { data, error } = await supabase
-        .from("games")
-        .select("*")
-        .order("played_at", { ascending: false, nullsFirst: false });
+      // Le cockpit ne montre QUE les games du compte Riot actuellement lié.
+      // `user_id` seul ne suffit pas : relier un autre Riot ID écrase
+      // profiles.puuid mais laisse les anciennes games en base, et le cockpit
+      // affichait alors un mélange des deux comptes. Celles des comptes
+      // précédents ne sont pas supprimées — juste plus affichées, et elles
+      // reviennent si ce compte est relié un jour.
+      if (profile?.puuid) {
+        const { data, error } = await supabase
+          .from("games")
+          .select("*")
+          .eq("puuid", profile.puuid)
+          .order("played_at", { ascending: false, nullsFirst: false });
 
-      if (!active) return;
-      if (error) {
-        console.error("Impossible de charger les games", error);
-      } else {
-        setGames((data as GameRow[]).map(fromRow));
+        if (!active) return;
+        if (error) {
+          console.error("Impossible de charger les games", error);
+        } else {
+          setGames((data as GameRow[]).map(fromRow));
+        }
       }
       setLoading(false);
     })();

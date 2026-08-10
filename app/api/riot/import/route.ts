@@ -37,13 +37,30 @@ type Row = {
   deaths10: number;
   queue: string;
   played_at: string;
-  // Nullable : les games déjà en cache avant la Slice 3 n'ont pas ces
-  // colonnes tant qu'elles ne sont pas réimportées (cf. buildRowsForMatchIds).
+  // Nullable côté base (colonnes ajoutées en Slice 3), mais une ligne du cache
+  // à qui il en manque une est retéléchargée plutôt que resservie : cf.
+  // `isComplete`. Toute Row rendue ici les a donc réellement.
   cs_final: number | null;
   game_duration_seconds: number | null;
 };
 
 type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
+
+// Une ligne en cache n'est réutilisable que si elle est COMPLÈTE. Sans
+// `cs_final` ni durée, `csMetrics` ne peut pas calculer le CS/min après 20 min
+// et affiche "—" ; comme rien d'autre ne déclenche jamais de réimport, ce "—"
+// serait définitif pour toute game importée avant la Slice 3. La traiter comme
+// absente du cache la fait retélécharger une fois, puis se réparer en base.
+function isComplete(row: Partial<Row> & { puuid?: string | null }): boolean {
+  return Boolean(
+    row.riot_match_id &&
+      row.queue &&
+      row.played_at &&
+      row.puuid &&
+      row.cs_final !== null &&
+      row.game_duration_seconds !== null
+  );
+}
 
 // Construit les lignes d'affichage pour une liste de matchIds, en réutilisant
 // tout ce qui est déjà en base (une game finie ne change jamais) et en
@@ -65,16 +82,18 @@ async function buildRowsForMatchIds(
   const cacheMap = new Map<string, Row>();
 
   if (persist) {
+    // Le cache se lit par (user_id, puuid) et pas par user_id seul : un même
+    // user peut avoir relié plusieurs comptes Riot au fil du temps, et servir
+    // la ligne d'un autre compte donnerait les stats d'un autre joueur.
     const { data: cached } = await supabase
       .from("games")
-      .select("riot_match_id, lane, champion, matchup, result, cs20, deaths10, queue, played_at, cs_final, game_duration_seconds")
+      .select("riot_match_id, lane, champion, matchup, result, cs20, deaths10, queue, played_at, cs_final, game_duration_seconds, puuid")
       .eq("user_id", userId)
+      .eq("puuid", puuid)
       .in("riot_match_id", matchIds);
 
     for (const row of cached ?? []) {
-      if (row.riot_match_id && row.queue && row.played_at) {
-        cacheMap.set(row.riot_match_id, row as Row);
-      }
+      if (isComplete(row)) cacheMap.set(row.riot_match_id as string, row as Row);
     }
   }
 
@@ -110,11 +129,16 @@ async function buildRowsForMatchIds(
   const newRows = freshRows.filter((row): row is Row => row !== null);
 
   if (persist && newRows.length > 0) {
+    // `ignoreDuplicates: false` : une ligne déjà présente doit être MISE À JOUR,
+    // sinon une game importée avant la Slice 3 garderait ses colonnes nulles à
+    // vie. Seules les colonnes du payload sont réécrites — les trois listes
+    // d'erreurs et le résumé, saisis par le joueur dans /suivi, n'y sont pas et
+    // sont donc préservés.
     const { error } = await supabase
       .from("games")
       .upsert(
-        newRows.map((row) => ({ ...row, user_id: userId })),
-        { onConflict: "user_id,riot_match_id", ignoreDuplicates: true }
+        newRows.map((row) => ({ ...row, user_id: userId, puuid })),
+        { onConflict: "user_id,riot_match_id", ignoreDuplicates: false }
       );
     if (error) {
       console.error("Sauvegarde de l'import impossible", error);
