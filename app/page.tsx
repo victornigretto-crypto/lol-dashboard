@@ -10,13 +10,15 @@ import {
   csPerMinClass,
   deaths10Band,
   deaths10Class,
+  highlightClass,
+  targetsOf,
+  type Targets,
 } from "@/lib/stats";
 import {
   dominantRole,
   FALLBACK_CONTENT,
   getContent,
   tierFromRiotTier,
-  type StatKey,
   type TierContent,
 } from "@/lib/content";
 import { championIconUrl, useDdragonVersion } from "@/lib/ddragon";
@@ -54,10 +56,6 @@ type SearchResult = {
   rank: Rank | null;
 };
 
-// Cibles de performance du palier analysé (lib/content). `null` = palier ou
-// rôle sans contenu défini : on n'affiche alors aucun jugement de couleur.
-type Targets = { csPerMin: number | null; deaths10: number | null };
-
 // Le compte analysé n'a pas de profil en base (analyse éphémère) : son rôle
 // se déduit de la lane la plus jouée sur les games récupérées, et son palier
 // du tier league-v4 renvoyé par l'import. Rôle indéterminable : contenu de
@@ -66,18 +64,6 @@ function resolveContent(games: RiotGame[], rank: Rank | null): TierContent {
   const role = dominantRole(games.map((g) => g.lane));
   if (!role) return FALLBACK_CONTENT;
   return getContent(role, tierFromRiotTier(rank?.tier));
-}
-
-function targetsOf(content: TierContent): Targets {
-  return { csPerMin: content.csPerMinTarget, deaths10: content.deaths10Target };
-}
-
-// Une colonne mise en avant par le contenu du palier reçoit un liseré : c'est
-// la stat sur laquelle ce palier doit se concentrer en priorité.
-const HIGHLIGHT_RING = " ring-2 ring-blue-400";
-
-function highlight(content: TierContent, stat: StatKey): string {
-  return content.highlightStats.includes(stat) ? HIGHLIGHT_RING : "";
 }
 
 type Severity = "red" | "yellow" | "green";
@@ -247,7 +233,7 @@ function GameRow({
         className={
           "hidden w-20 rounded px-1 py-0.5 text-center text-sm sm:block " +
           csPerMinClass(perMinPre20, targets.csPerMin) +
-          highlight(content, "csPre20")
+          highlightClass(content, "csPre20")
         }
       >
         <p className="text-[10px] leading-tight opacity-80">CS/min à 20min</p>
@@ -257,7 +243,7 @@ function GameRow({
         className={
           "hidden w-20 rounded px-1 py-0.5 text-center text-sm sm:block " +
           csPerMinClass(perMinPost20, targets.csPerMin) +
-          highlight(content, "csPost20")
+          highlightClass(content, "csPost20")
         }
       >
         <p className="text-[10px] leading-tight opacity-80">CS/min après 20min</p>
@@ -267,7 +253,7 @@ function GameRow({
         className={
           "hidden w-20 rounded px-1 py-0.5 text-center text-sm sm:block " +
           deaths10Class(game.deaths10, targets.deaths10) +
-          highlight(content, "deaths10")
+          highlightClass(content, "deaths10")
         }
       >
         <p className="text-[10px] leading-tight opacity-80">Morts/10m</p>

@@ -4,6 +4,7 @@
 // Les couleurs sont RELATIVES à la cible du palier (lib/content), jamais à une
 // échelle absolue : 132 CS à 20 min, c'est bon en Iron et faible en Émeraude.
 import { csPerMin } from "@/lib/riot/transform";
+import type { StatKey, TierContent } from "@/lib/content";
 
 // Champs bruts tels que stockés en base / renvoyés par /api/riot/import.
 // Aucune colonne dérivée : tout ce qui suit est calculé à la lecture.
@@ -107,4 +108,21 @@ export function csPerMinClass(value: number | null, target: number | null): stri
 
 export function deaths10Class(value: number | null, target: number | null): string {
   return bandClass(deaths10Band(value, target));
+}
+
+// Cibles de performance du palier, extraites du contenu. `null` = palier ou
+// rôle sans contenu écrit : ni couleur, ni jugement.
+export type Targets = { csPerMin: number | null; deaths10: number | null };
+
+export function targetsOf(content: TierContent): Targets {
+  return { csPerMin: content.csPerMinTarget, deaths10: content.deaths10Target };
+}
+
+// Une stat mise en avant par le contenu du palier reçoit un liseré : c'est
+// celle sur laquelle ce palier doit se concentrer en priorité. Concaténé à
+// une classe de couleur, d'où l'espace initial.
+const HIGHLIGHT_RING = " ring-2 ring-blue-400";
+
+export function highlightClass(content: TierContent, stat: StatKey): string {
+  return content.highlightStats.includes(stat) ? HIGHLIGHT_RING : "";
 }

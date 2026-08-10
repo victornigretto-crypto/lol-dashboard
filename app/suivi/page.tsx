@@ -3,13 +3,19 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { csMetrics, csPerMinClass, deaths10Class } from "@/lib/stats";
+import {
+  csMetrics,
+  csPerMinClass,
+  deaths10Class,
+  highlightClass,
+  targetsOf,
+  type Targets,
+} from "@/lib/stats";
 import {
   FALLBACK_CONTENT,
   getContent,
   roleFromLane,
   tierFromRiotTier,
-  type StatKey,
   type TierContent,
 } from "@/lib/content";
 import { championIconUrl, useDdragonVersion } from "@/lib/ddragon";
@@ -43,14 +49,6 @@ type GameRow = Omit<Game, "errorLane" | "errorMacro" | "errorFight"> & {
 };
 
 type Rank = { tier: string; rank: string; leaguePoints: number } | null;
-
-type Targets = { csPerMin: number | null; deaths10: number | null };
-
-const HIGHLIGHT_RING = " ring-2 ring-blue-400";
-
-function highlight(content: TierContent, stat: StatKey): string {
-  return content.highlightStats.includes(stat) ? HIGHLIGHT_RING : "";
-}
 
 // Les listes d'erreurs sont stockées en base sans case vide ; l'UI ajoute
 // toujours un champ vide en fin de liste pour permettre d'en saisir une nouvelle.
@@ -203,7 +201,7 @@ export default function SuiviPage() {
     router.refresh();
   };
 
-  const targets: Targets = { csPerMin: content.csPerMinTarget, deaths10: content.deaths10Target };
+  const targets: Targets = targetsOf(content);
 
   return (
     <main className="min-h-screen bg-slate-950 p-4 text-slate-100">
@@ -363,7 +361,7 @@ function GameCard({
           className={
             "w-20 rounded px-1 py-0.5 text-center text-sm " +
             csPerMinClass(perMinPre20, targets.csPerMin) +
-            highlight(content, "csPre20")
+            highlightClass(content, "csPre20")
           }
         >
           <p className="text-[10px] leading-tight opacity-80">CS/min à 20min</p>
@@ -373,7 +371,7 @@ function GameCard({
           className={
             "w-20 rounded px-1 py-0.5 text-center text-sm " +
             csPerMinClass(perMinPost20, targets.csPerMin) +
-            highlight(content, "csPost20")
+            highlightClass(content, "csPost20")
           }
         >
           <p className="text-[10px] leading-tight opacity-80">CS/min après 20min</p>
@@ -383,7 +381,7 @@ function GameCard({
           className={
             "w-20 rounded px-1 py-0.5 text-center text-sm " +
             deaths10Class(game.deaths10, targets.deaths10) +
-            highlight(content, "deaths10")
+            highlightClass(content, "deaths10")
           }
         >
           <p className="text-[10px] leading-tight opacity-80">Morts/10m</p>
