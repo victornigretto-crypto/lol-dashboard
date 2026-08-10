@@ -11,10 +11,10 @@ export function parseRiotId(raw: string): { gameName: string; tagLine: string } 
 
 // On n'affiche jamais l'ARAM ni les autres modes annexes : uniquement les
 // files "vraie game" (Normal Draft, SoloQ, Flex).
-export const QUEUE_NORMAL = 400;
-export const QUEUE_SOLOQ = 420;
-export const QUEUE_FLEX = 440;
-export const ALLOWED_QUEUE_IDS = new Set([QUEUE_NORMAL, QUEUE_SOLOQ, QUEUE_FLEX]);
+const QUEUE_NORMAL = 400;
+export const QUEUE_SOLOQ = 420; // seul id utilisé hors de ce module (filtre SoloQ des routes)
+const QUEUE_FLEX = 440;
+const ALLOWED_QUEUE_IDS = new Set([QUEUE_NORMAL, QUEUE_SOLOQ, QUEUE_FLEX]);
 
 const QUEUE_LABELS: Record<number, string> = {
   [QUEUE_NORMAL]: "Normal",

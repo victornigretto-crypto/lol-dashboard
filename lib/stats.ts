@@ -25,7 +25,7 @@ const PRE20_WINDOW_MIN = 20;
 // au-delà de ce seuil la valeur est forcément en ms.
 const MS_THRESHOLD_SECONDS = 10000;
 
-export function durationMinutes(rawDuration: number | null): number | null {
+function durationMinutes(rawDuration: number | null): number | null {
   if (rawDuration == null || rawDuration <= 0) return null;
   const seconds = rawDuration > MS_THRESHOLD_SECONDS ? rawDuration / 1000 : rawDuration;
   return seconds / 60;
@@ -34,17 +34,18 @@ export function durationMinutes(rawDuration: number | null): number | null {
 // Unique implémentation du CS/min avant / après 20 min. Les deux pages
 // passent par ici : ne pas recalculer ça ailleurs.
 export function csMetrics(game: CsSource): CsMetrics {
-  const perMinPre20 = game.cs20 == null ? null : csPerMin(game.cs20, PRE20_WINDOW_MIN);
-
+  const { cs20, cs_final } = game;
   const minutes = durationMinutes(game.game_duration_seconds);
-  const hasPost20 =
-    game.cs_final != null && game.cs20 != null && minutes != null && minutes > PRE20_WINDOW_MIN;
+
+  const perMinPre20 = cs20 === null ? null : csPerMin(cs20, PRE20_WINDOW_MIN);
+
+  // Le post-20 n'existe que si la game a dépassé 20 min et qu'on connaît le
+  // CS de fin : sinon la valeur reste inconnue, jamais approximée à 0.
+  const hasPost20 = cs20 !== null && cs_final !== null && minutes !== null && minutes > PRE20_WINDOW_MIN;
 
   return {
     perMinPre20,
-    perMinPost20: hasPost20
-      ? csPerMin(game.cs_final! - game.cs20!, minutes! - PRE20_WINDOW_MIN)
-      : null,
+    perMinPost20: hasPost20 ? csPerMin(cs_final - cs20, minutes - PRE20_WINDOW_MIN) : null,
   };
 }
 
@@ -96,7 +97,7 @@ const BAND_CLASS: Record<Band, string> = {
   unknown: "bg-slate-800 text-slate-300",
 };
 
-export function bandClass(band: Band): string {
+function bandClass(band: Band): string {
   return BAND_CLASS[band];
 }
 

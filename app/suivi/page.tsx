@@ -1,5 +1,5 @@
 "use client";
-import React, { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
@@ -266,7 +266,9 @@ export default function SuiviPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {games.map((game, gameIndex) => (
+                  {games.map((game, gameIndex) => {
+                    const { perMinPre20, perMinPost20 } = csMetrics(game);
+                    return (
                     <tr key={game.id} className="border-b border-slate-800 hover:bg-slate-800/50 align-top">
                       <td className="w-8 px-2 py-3 text-slate-100 text-center">{gameIndex + 1}</td>
                       <td className="w-20 px-2 py-3 text-slate-200">{game.lane}</td>
@@ -280,21 +282,19 @@ export default function SuiviPage() {
                       <td className="w-20 px-2 py-3 text-center">
                         <span
                           className={
-                            csPerMinClass(csMetrics(game).perMinPre20, targets.csPerMin) +
-                            " block rounded px-2 py-0.5 text-xs"
+                            csPerMinClass(perMinPre20, targets.csPerMin) + " block rounded px-2 py-0.5 text-xs"
                           }
                         >
-                          {csMetrics(game).perMinPre20 ?? "—"}
+                          {perMinPre20 ?? "—"}
                         </span>
                       </td>
                       <td className="w-20 px-2 py-3 text-center">
                         <span
                           className={
-                            csPerMinClass(csMetrics(game).perMinPost20, targets.csPerMin) +
-                            " block rounded px-2 py-0.5 text-xs"
+                            csPerMinClass(perMinPost20, targets.csPerMin) + " block rounded px-2 py-0.5 text-xs"
                           }
                         >
-                          {csMetrics(game).perMinPost20 ?? "—"}
+                          {perMinPost20 ?? "—"}
                         </span>
                       </td>
                       <td className="w-20 px-2 py-3 text-center">
@@ -352,7 +352,8 @@ export default function SuiviPage() {
                         />
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
               {games.length === 0 && (
