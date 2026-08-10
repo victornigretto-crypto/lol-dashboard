@@ -36,16 +36,14 @@ gratuite et sans compte ; le suivi dans la durée demande un compte.
              les games et les 3 champs d'erreurs à remplir
 ```
 
-> ### ⚠ Action requise avant que `/suivi` fonctionne
-> La colonne `games.puuid` a été ajoutée à [supabase/schema.sql](supabase/schema.sql) le
-> 2026-08-10 mais **la migration doit être lancée à la main** par Victor dans Supabase →
-> SQL Editor. Sans elle, le cockpit renvoie une erreur (le code demande une colonne qui
-> n'existe pas).
-> ```sql
-> alter table public.games add column if not exists puuid text;
-> ```
-> **Si une session démarre sur un bug de `/suivi`, vérifier ça en premier.**
-> Statut au moment d'écrire ces lignes : **inconnu, pas confirmé par Victor.**
+> ### Migrations à jour au 2026-08-10
+> `alter table public.games add column if not exists puuid text;` — **lancée et confirmée
+> par Victor** le 2026-08-10. Le schéma en base correspond donc à
+> [supabase/schema.sql](supabase/schema.sql), et le code sur `master` a ce qu'il lui faut.
+>
+> Rappel de fonctionnement : Victor lance le SQL lui-même dans Supabase → SQL Editor. Si
+> une session démarre sur une erreur de `/suivi` parlant d'une colonne manquante, c'est
+> qu'une migration plus récente n'est pas passée — le vérifier avant toute autre piste.
 
 **Ce qui marche, vérifié en session :** import Riot de bout en bout (compte → 20 games →
 rang), cache en base, garde-fou anti-pollution, auth Supabase complète (login / signup /
@@ -109,13 +107,10 @@ le test n'est pas un faux positif.
 ressemble exactement à un débordement responsive. Pour un vrai test étroit, charger la page
 dans une `<iframe>` de la largeur voulue et lire `documentElement.scrollWidth` dedans.
 
-**Pas encore vérifié en vrai :** la suppression elle-même, qui demande une session
-connectée. À confirmer par Victor.
-
-**Poussé sur `origin/master`** à la demande de Victor, sans attendre sa vérification — il a
-tranché après que le risque lui a été signalé. Donc : le code sur `master` suppose la
-migration `games.puuid` faite. **Première question à poser en début de session suivante :
-est-ce que la migration est passée, et est-ce que le changement de profil marche ?**
+**Clôture de la session.** Tout est poussé sur `origin/master`, et Victor a lancé la
+migration `games.puuid` avant de fermer. Il n'a en revanche **pas eu le temps de tester
+l'application** : trois choses restent donc à confirmer au premier retour (reprises dans
+« Reste à faire »), et il ne faut pas les considérer comme acquises.
 
 ---
 
@@ -252,6 +247,20 @@ trailer `Co-Authored-By`. S'y tenir.
 ## Reste à faire
 
 Classé par ce que ça rapporte, pas par difficulté.
+
+### À vérifier en tout premier (hérité du 2026-08-10, jamais testé en vrai)
+
+Le code de la session du 2026-08-10 a été poussé sans que Victor ait pu ouvrir l'app.
+**Commencer par lui demander où ça en est, avant d'entamer autre chose.**
+
+- [ ] **Le cockpit charge**, n'affiche plus qu'un seul compte Riot (fin du mélange
+      cartem/chopin), et le **CS/min après 20 min affiche enfin des valeurs**.
+- [ ] **Les notes écrites à la main survivent au réimport.** C'est le point le plus
+      sensible : l'upsert ne liste pas `error_lane` / `error_macro` / `error_fight` /
+      `summary`, elles devraient donc être préservées — vérifié par le raisonnement, jamais
+      en vrai. Si ça a effacé des notes, c'est à corriger toutes affaires cessantes.
+- [ ] **Le changement de profil** lie bien le nouveau compte et supprime l'ancien.
+      Opération irréversible : à tester avec un compte dont les notes n'ont pas de valeur.
 
 ### Décisions qui n'appartiennent qu'à Victor
 
