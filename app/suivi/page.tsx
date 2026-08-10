@@ -20,7 +20,7 @@ import {
 } from "@/lib/content";
 import { championIconUrl, useDdragonVersion } from "@/lib/ddragon";
 import { rankEmblemUrl, rankLabel } from "@/lib/riot/rank";
-import { formatGameDate } from "@/lib/riot/transform";
+import { formatGameDate, parseRiotId } from "@/lib/riot/transform";
 
 // Les champs venant de l'import Riot sont en lecture seule ici : seuls les
 // trois listes d'erreurs et le résumé sont saisis par le joueur (Slice 4).
@@ -86,8 +86,18 @@ export default function SuiviPage() {
   const [loading, setLoading] = useState(true);
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [rank, setRank] = useState<Rank>(null);
+  const [riotId, setRiotId] = useState<string | null>(null);
   const [primaryRole, setPrimaryRole] = useState<string | null>(null);
   const [content, setContent] = useState<TierContent>(FALLBACK_CONTENT);
+
+  // Changement de compte Riot. `reloadKey` relance l'effet de chargement au
+  // lieu de dupliquer sa logique : il garde ainsi son propre garde-fou
+  // `active` et l'ordre import -> lecture des games.
+  const [switchOpen, setSwitchOpen] = useState(false);
+  const [switchInput, setSwitchInput] = useState("");
+  const [switching, setSwitching] = useState(false);
+  const [switchError, setSwitchError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
   const gamesRef = useRef<Game[]>([]);
   const saveTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
@@ -113,6 +123,7 @@ export default function SuiviPage() {
         .maybeSingle();
       if (!active) return;
       setPrimaryRole(profile?.primary_role ?? null);
+      setRiotId(profile?.riot_id ?? null);
 
       // Un seul appel sert deux besoins : il importe (et persiste) les games
       // manquantes de CE compte lié, et renvoie le rang league-v4 dont on a
@@ -143,10 +154,10 @@ export default function SuiviPage() {
 
       // Le cockpit ne montre QUE les games du compte Riot actuellement lié.
       // `user_id` seul ne suffit pas : relier un autre Riot ID écrase
-      // profiles.puuid mais laisse les anciennes games en base, et le cockpit
-      // affichait alors un mélange des deux comptes. Celles des comptes
-      // précédents ne sont pas supprimées — juste plus affichées, et elles
-      // reviennent si ce compte est relié un jour.
+      // profiles.puuid mais laissait les anciennes games en base, et le cockpit
+      // affichait alors un mélange des deux comptes. Le filtre reste la
+      // deuxième barrière même si `handleSwitchProfile` efface déjà tout ce qui
+      // n'appartient pas au compte courant.
       if (profile?.puuid) {
         const { data, error } = await supabase
           .from("games")
@@ -167,7 +178,7 @@ export default function SuiviPage() {
     return () => {
       active = false;
     };
-  }, [supabase]);
+  }, [supabase, reloadKey]);
 
   const scheduleSave = (id: string) => {
     const timers = saveTimers.current;
@@ -210,49 +221,179 @@ export default function SuiviPage() {
     router.refresh();
   };
 
+  // Changement de compte Riot. La liaison passe par la route de l'onboarding
+  // (elle réécrit puuid / riot_id / primary_role) ; `onboarded_at` reste posé,
+  // donc pas de re-onboarding.
+  //
+  // La suppression est VOLONTAIREMENT définitive et couvre tout ce qui
+  // n'appartient pas au nouveau compte : l'ancien compte lié, mais aussi les
+  // games héritées d'avant la colonne `puuid`, qui ne sont attribuables à aucun
+  // compte et sont précisément la cause du mélange. Les notes écrites à la main
+  // partent avec — c'est le sens de l'avertissement affiché avant de valider.
+  //
+  // On lie AVANT de supprimer : si le Riot ID est faux ou l'API Riot injoignable,
+  // rien n'est effacé.
+  const handleSwitchProfile = async (e: React.SubmitEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const parsed = parseRiotId(switchInput);
+    if (!parsed) {
+      setSwitchError("Format attendu : Pseudo#TAG");
+      return;
+    }
+    setSwitching(true);
+    setSwitchError(null);
+    try {
+      const res = await fetch("/api/profile/link", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ riotId: `${parsed.gameName}#${parsed.tagLine}` }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error ?? "Liaison impossible.");
+
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      // Garde-fou : sans puuid exploitable, le filtre "tout sauf lui" viserait
+      // la totalité des games. On préfère ne rien supprimer.
+      if (user && typeof body.puuid === "string" && body.puuid !== "") {
+        const { error } = await supabase
+          .from("games")
+          .delete()
+          .eq("user_id", user.id)
+          .or(`puuid.is.null,puuid.neq.${body.puuid}`);
+        if (error) console.error("Suppression de l'ancien profil impossible", error);
+      }
+
+      setGames([]);
+      setRank(null);
+      setContent(FALLBACK_CONTENT);
+      setSwitchOpen(false);
+      setSwitchInput("");
+      setLoading(true);
+      setReloadKey((key) => key + 1);
+    } catch (err) {
+      setSwitchError(err instanceof Error ? err.message : "Changement impossible (réseau).");
+    } finally {
+      setSwitching(false);
+    }
+  };
+
   const targets: Targets = targetsOf(content);
+  const parsedRiotId = riotId ? parseRiotId(riotId) : null;
 
   return (
     <main className="min-h-screen bg-slate-950 p-4 text-slate-100">
       <section className="mx-auto max-w-5xl">
-        <header className="mb-6 rounded-2xl border border-slate-700 bg-slate-900/90 p-5">
-          <div className="flex flex-wrap items-start justify-between gap-4">
-            <div>
-              <Link href="/" className="text-sm uppercase tracking-[0.3em] text-blue-400 hover:text-blue-300">
-                GG Dashboard
-              </Link>
-              <h1 className="mt-3 text-3xl font-semibold">Mon suivi</h1>
-              <p className="mt-1 text-slate-400">
-                {primaryRole ? `Rôle principal : ${primaryRole}` : "Rôle principal en cours de détection"}
-              </p>
-            </div>
+        <header className="mb-6">
+          {/* Hors du cadre : ce qui concerne le COMPTE GG DASHBOARD (email,
+              déconnexion) et le choix du compte Riot analysé. Le cadre, lui, ne
+              parle que du profil LoL affiché — d'où la séparation. */}
+          <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+            <button
+              onClick={() => {
+                setSwitchOpen((open) => !open);
+                setSwitchError(null);
+              }}
+              className="rounded-full border border-slate-700 px-4 py-1.5 text-sm text-slate-300 hover:bg-slate-800"
+            >
+              Changer de profil
+            </button>
 
-            <div className="flex items-center gap-4">
+            <div className="flex flex-col items-end gap-2 text-sm text-slate-400">
+              {userEmail && <span>{userEmail}</span>}
+              <button
+                onClick={handleLogout}
+                className="rounded border border-slate-700 px-3 py-1 hover:bg-slate-800"
+              >
+                Se déconnecter
+              </button>
+            </div>
+          </div>
+
+          {switchOpen && (
+            <form
+              onSubmit={handleSwitchProfile}
+              className="mb-3 rounded-2xl border border-red-500/40 bg-red-500/10 p-4"
+            >
+              <p className="text-sm font-semibold text-red-200">
+                Changer de profil supprime définitivement tes données
+              </p>
+              <p className="mt-1 text-sm text-slate-300">
+                Les games et les notes {riotId ? "de " : "du compte actuel"}
+                {riotId && <span className="font-semibold text-slate-100">{riotId}</span>} seront
+                effacées. Cette action est irréversible.
+              </p>
+
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <input
+                  type="text"
+                  value={switchInput}
+                  onChange={(e) => setSwitchInput(e.target.value)}
+                  placeholder="Pseudo#TAG"
+                  autoFocus
+                  className="min-w-0 flex-1 rounded-full border border-slate-700 bg-slate-900 px-4 py-2 text-sm text-slate-100 outline-none focus:border-blue-500"
+                />
+                <button
+                  type="submit"
+                  disabled={switching || !switchInput.trim()}
+                  className="rounded-full bg-red-600 px-5 py-2 text-sm font-semibold text-white hover:bg-red-500 disabled:opacity-50"
+                >
+                  {switching ? "..." : "Changer et supprimer"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSwitchOpen(false);
+                    setSwitchInput("");
+                    setSwitchError(null);
+                  }}
+                  className="rounded-full border border-slate-700 px-4 py-2 text-sm text-slate-300 hover:bg-slate-800"
+                >
+                  Annuler
+                </button>
+              </div>
+
+              {switchError && <p className="mt-2 text-sm text-red-400">{switchError}</p>}
+            </form>
+          )}
+
+          <div className="rounded-2xl border border-slate-700 bg-slate-900/90 p-5">
+            <div className="flex flex-wrap items-end justify-between gap-4">
+              <div className="min-w-0">
+                <Link href="/" className="text-sm uppercase tracking-[0.3em] text-blue-400 hover:text-blue-300">
+                  GG Dashboard
+                </Link>
+                <h1 className="mt-3 text-3xl font-semibold break-words">
+                  {parsedRiotId ? (
+                    <>
+                      {parsedRiotId.gameName}
+                      <span className="text-slate-500">#{parsedRiotId.tagLine}</span>
+                    </>
+                  ) : (
+                    "Mon suivi"
+                  )}
+                </h1>
+                <p className="mt-1 text-slate-400">
+                  {primaryRole ? `Rôle principal : ${primaryRole}` : "Rôle principal en cours de détection"}
+                </p>
+              </div>
+
+              {/* Emblème, palier, LP empilés — la disposition du client LoL. */}
               {rank && (
-                <div className="flex items-center gap-2">
+                <div className="flex shrink-0 flex-col items-center">
                   <img
                     src={rankEmblemUrl(rank.tier)}
                     alt={rank.tier}
-                    className="h-12 w-12 object-contain"
+                    className="h-20 w-20 object-contain"
                     onError={(e) => {
                       e.currentTarget.style.display = "none";
                     }}
                   />
-                  <div>
-                    <p className="font-semibold">{rankLabel(rank.tier, rank.rank)}</p>
-                    <p className="text-sm text-slate-400">{rank.leaguePoints} LP</p>
-                  </div>
+                  <p className="mt-1 text-lg font-semibold">{rankLabel(rank.tier, rank.rank)}</p>
+                  <p className="text-sm text-slate-400">{rank.leaguePoints} LP</p>
                 </div>
               )}
-              <div className="flex flex-col items-end gap-2 text-sm text-slate-400">
-                {userEmail && <span>{userEmail}</span>}
-                <button
-                  onClick={handleLogout}
-                  className="rounded border border-slate-700 px-3 py-1 hover:bg-slate-800"
-                >
-                  Se déconnecter
-                </button>
-              </div>
             </div>
           </div>
         </header>

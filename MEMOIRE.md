@@ -48,6 +48,55 @@ seulement de **iron à emerald**. Tout le reste tombe sur `FALLBACK_CONTENT`
 
 ## Journal des sessions
 
+### 2026-08-10 (3) — Bandeau du cockpit + changement de profil
+
+Refonte du `<header>` de [app/suivi/page.tsx](app/suivi/page.tsx), à la demande de Victor :
+
+```
+[ Changer de profil ]                        paul.gentil224@gmail.com
+                                                 [ Se déconnecter ]
+┌────────────────────────────────────────────────────────────────────┐
+│  GG DASHBOARD                                        ⬥ (emblème)   │
+│  GrosGalio#EUW                                        Diamond IV    │
+│  Rôle principal : Mid                                    52 LP      │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+Le principe de rangement : **hors du cadre = le compte GG Dashboard** (email, déconnexion,
+choix du compte Riot) ; **dans le cadre = le profil LoL affiché** (pseudo, rôle, rang).
+« Mon suivi » est remplacé par le Riot ID, et le rang passe en pile emblème → palier → LP,
+comme dans le client LoL.
+
+**Changement de profil = suppression définitive.** Décision explicite de Victor, contre la
+recommandation « masquer sans supprimer ». `handleSwitchProfile` lie le nouveau compte via
+`/api/profile/link` (la route de l'onboarding, `onboarded_at` reste posé donc pas de
+re-onboarding), **puis** supprime tout ce qui n'appartient pas au nouveau puuid — l'ancien
+compte lié *et* les lignes à `puuid = null` héritées d'avant la migration, qui sont la cause
+historique du mélange. Les notes écrites à la main partent avec : c'est le sens de
+l'avertissement rouge affiché avant de valider.
+
+Deux garde-fous à ne pas retirer :
+- on **lie avant de supprimer** : Riot ID faux ou API injoignable → rien n'est effacé ;
+- suppression seulement si le puuid renvoyé est une chaîne non vide, sinon le filtre
+  « tout sauf lui » viserait la totalité des games.
+
+**Vérifications faites :** mise en page rendue hors session en servant le CSS compilé de
+l'app à une maquette du bandeau (`/suivi` exige une session, donc pas de capture directe).
+Aucun débordement à 390 px de large — mesuré, `scrollWidth == clientWidth`. Et la grammaire
+du filtre de suppression (`or=(puuid.is.null,puuid.neq.X)`) validée par un DELETE anonyme
+que RLS bloque : 204 sur la vraie syntaxe, 400 sur une syntaxe volontairement cassée, donc
+le test n'est pas un faux positif.
+
+**Piège de mesure à retenir :** Chrome headless sous Windows n'honore pas
+`--window-size` en dessous d'environ 500 px — il rend à ~504 px et *recadre* l'image, ce qui
+ressemble exactement à un débordement responsive. Pour un vrai test étroit, charger la page
+dans une `<iframe>` de la largeur voulue et lire `documentElement.scrollWidth` dedans.
+
+**Pas encore vérifié en vrai :** la suppression elle-même, qui demande une session
+connectée. À confirmer par Victor.
+
+---
+
 ### 2026-08-10 (2) — Profil mélangé + CS après 20 min jamais affiché
 
 **Symptômes rapportés :** en se connectant sur `grosgalio`, le cockpit montrait un mix des
