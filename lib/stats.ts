@@ -38,7 +38,13 @@ export function csMetrics(game: CsSource): CsMetrics {
   const { cs20, cs_final } = game;
   const minutes = durationMinutes(game.game_duration_seconds);
 
-  const perMinPre20 = cs20 === null ? null : csPerMin(cs20, PRE20_WINDOW_MIN);
+  // Une game qui s'arrête avant 20 min n'a pas laissé 20 minutes pour farmer :
+  // diviser par la fenêtre pleine sous-estimerait le CS/min (113 CS en 15,4 min,
+  // c'est 7.3 CS/min, pas 5.7). Durée inconnue — games importées avant que la
+  // colonne existe — : impossible de savoir, on garde la fenêtre pleine.
+  const pre20Minutes =
+    minutes !== null && minutes < PRE20_WINDOW_MIN ? minutes : PRE20_WINDOW_MIN;
+  const perMinPre20 = cs20 === null ? null : csPerMin(cs20, pre20Minutes);
 
   // Le post-20 n'existe que si la game a dépassé 20 min et qu'on connaît le
   // CS de fin : sinon la valeur reste inconnue, jamais approximée à 0.

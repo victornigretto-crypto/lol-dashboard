@@ -45,27 +45,6 @@ type Row = {
 
 type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
 
-// Récupère les identifiants de matchs candidats selon le filtre choisi.
-// - soloq / ranked : Riot filtre déjà côté serveur (queue / type), pas de gaspillage d'appels.
-// - all : aucun filtre Riot ne garantit d'exclure l'ARAM proprement, donc on
-//   scanne une fenêtre de matchs récents et on filtrera nous-mêmes sur queueId.
-async function collectCandidateMatchIds(puuid: string, filter: Filter): Promise<string[]> {
-  if (filter === "soloq") {
-    return getMatchIds(puuid, { count: TARGET_COUNT, queue: QUEUE_SOLOQ });
-  }
-  if (filter === "ranked") {
-    return getMatchIds(puuid, { count: TARGET_COUNT, type: "ranked" });
-  }
-
-  const ids: string[] = [];
-  for (let start = 0; start < MAX_SCAN; start += PAGE_SIZE) {
-    const page = await getMatchIds(puuid, { start, count: PAGE_SIZE });
-    ids.push(...page);
-    if (page.length < PAGE_SIZE) break;
-  }
-  return ids;
-}
-
 // Construit les lignes d'affichage pour une liste de matchIds, en réutilisant
 // tout ce qui est déjà en base (une game finie ne change jamais) et en
 // n'appelant l'API Riot que pour les matchs réellement inconnus, en parallèle.
@@ -147,6 +126,41 @@ async function buildRowsForMatchIds(
   return matchIds.map((id) => cacheMap.get(id)).filter((row): row is Row => row !== undefined);
 }
 
+// Rassemble les lignes à afficher selon le filtre, en ne demandant à Riot que
+// ce qui est nécessaire.
+// - soloq / ranked : Riot filtre déjà côté serveur (queue / type), une seule
+//   page suffit, aucun appel gaspillé.
+// - all : aucun filtre Riot ne garantit d'exclure l'ARAM proprement, il faut
+//   donc scanner et trier nous-mêmes sur queueId. On avance page par page et
+//   on s'arrête dès qu'on a le compte, au lieu de construire les MAX_SCAN
+//   candidats pour n'en garder que TARGET_COUNT : chaque match jeté coûterait
+//   deux appels Riot (match + timeline) et ferait sauter le quota de la dev
+//   key (100 req / 2 min), d'où des minutes d'attente en backoff 429.
+async function collectRows(
+  puuid: string,
+  filter: Filter,
+  userId: string | null,
+  supabase: SupabaseServerClient,
+  persist: boolean
+): Promise<Row[]> {
+  const build = (ids: string[]) => buildRowsForMatchIds(ids, puuid, userId, supabase, persist);
+
+  if (filter === "soloq") {
+    return build(await getMatchIds(puuid, { count: TARGET_COUNT, queue: QUEUE_SOLOQ }));
+  }
+  if (filter === "ranked") {
+    return build(await getMatchIds(puuid, { count: TARGET_COUNT, type: "ranked" }));
+  }
+
+  const rows: Row[] = [];
+  for (let start = 0; start < MAX_SCAN && rows.length < TARGET_COUNT; start += PAGE_SIZE) {
+    const page = await getMatchIds(puuid, { start, count: PAGE_SIZE });
+    rows.push(...(await build(page)));
+    if (page.length < PAGE_SIZE) break;
+  }
+  return rows;
+}
+
 export async function POST(request: Request) {
   const supabase = await createClient();
   const {
@@ -179,12 +193,11 @@ export async function POST(request: Request) {
       return profile?.puuid === account.puuid;
     })();
 
-    const [candidateIds, rankEntries] = await Promise.all([
-      collectCandidateMatchIds(account.puuid, filter),
+    const [rows, rankEntries] = await Promise.all([
+      collectRows(account.puuid, filter, user?.id ?? null, supabase, persist),
       getRankedEntriesByPuuid(account.puuid).catch(() => []),
     ]);
 
-    const rows = await buildRowsForMatchIds(candidateIds, account.puuid, user?.id ?? null, supabase, persist);
     const games = rows.slice(0, TARGET_COUNT);
 
     const soloq = rankEntries.find((entry) => entry.queueType === "RANKED_SOLO_5x5") ?? null;
