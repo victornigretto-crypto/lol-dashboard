@@ -3,7 +3,15 @@ import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { csClass, deathsClass } from "@/lib/stats";
+import {
+  averageCsPerMin,
+  csMetrics,
+  csPerMinBand,
+  csPerMinClass,
+  deaths10Band,
+  deaths10Class,
+} from "@/lib/stats";
+import { dominantRole, getContent, tierFromRiotTier } from "@/lib/content";
 import { rankEmblemUrl, rankLabel } from "@/lib/riot/rank";
 import { parseRiotId } from "@/lib/riot/transform";
 
@@ -31,6 +39,28 @@ type Rank = {
 
 type Filter = "soloq" | "ranked" | "all";
 
+type SearchResult = {
+  account: { gameName: string; tagLine: string };
+  games: RiotGame[];
+  rank: Rank | null;
+};
+
+// Cibles de performance du palier analysé (lib/content). `null` = palier ou
+// rôle sans contenu défini : on n'affiche alors aucun jugement de couleur.
+type Targets = { csPerMin: number | null; deaths10: number | null };
+
+const NO_TARGETS: Targets = { csPerMin: null, deaths10: null };
+
+// Le compte analysé n'a pas de profil en base (analyse éphémère) : son rôle
+// se déduit de la lane la plus jouée sur les games récupérées, et son palier
+// du tier league-v4 renvoyé par l'import.
+function resolveTargets(games: RiotGame[], rank: Rank | null): Targets {
+  const role = dominantRole(games.map((g) => g.lane));
+  if (!role) return NO_TARGETS;
+  const content = getContent(role, tierFromRiotTier(rank?.tier));
+  return { csPerMin: content.csPerMinTarget, deaths10: content.deaths10Target };
+}
+
 type Severity = "red" | "yellow" | "green";
 type Banner = { id: string; severity: Severity; text: string; detail: string };
 
@@ -48,7 +78,7 @@ const SEVERITY_CLASS: Record<Severity, string> = {
 };
 const FARM_LANES = new Set(["Top", "Mid", "Bot"]);
 
-async function fetchGames(riotId: string, filter: Filter) {
+async function fetchGames(riotId: string, filter: Filter): Promise<SearchResult> {
   const res = await fetch("/api/riot/import", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -56,7 +86,7 @@ async function fetchGames(riotId: string, filter: Filter) {
   });
   const body = await res.json();
   if (!res.ok) throw new Error(body.error ?? "Requête impossible.");
-  return body as { account: { gameName: string; tagLine: string }; games: RiotGame[]; rank: Rank | null };
+  return body as SearchResult;
 }
 
 function sortBanners(list: Banner[]): Banner[] {
@@ -94,22 +124,28 @@ function championDiversityBanner(games: RiotGame[]): Banner | null {
   return null;
 }
 
-function deathsBanner(games: RiotGame[]): Banner | null {
-  if (games.length === 0) return null;
+// Comme les couleurs du tableau, ces deux bannières se jugent par rapport à
+// la cible du palier et non sur une échelle absolue : sans cible connue
+// (palier sans contenu), on ne dit rien plutôt que de dire faux.
+function deathsBanner(games: RiotGame[], targets: Targets): Banner | null {
+  if (games.length === 0 || targets.deaths10 === null) return null;
   const avg = games.reduce((sum, g) => sum + g.deaths10, 0) / games.length;
-  const detail = `${avg.toFixed(1)} morts/10min en moyenne sur tes ${games.length} dernières classées`;
-  if (avg > 2) return { id: "deaths", severity: "red", text: "Beaucoup trop de morts", detail };
-  if (avg > 1.75) return { id: "deaths", severity: "yellow", text: "Trop de morts", detail };
+  const detail = `${avg.toFixed(1)} morts/10min en moyenne sur tes ${games.length} dernières classées (cible du palier : ${targets.deaths10})`;
+  const band = deaths10Band(avg, targets.deaths10);
+  if (band === "bad") return { id: "deaths", severity: "red", text: "Beaucoup trop de morts", detail };
+  if (band === "warn") return { id: "deaths", severity: "yellow", text: "Trop de morts", detail };
   return null;
 }
 
-function farmBanner(games: RiotGame[]): Banner | null {
+function farmBanner(games: RiotGame[], targets: Targets): Banner | null {
   const farmGames = games.filter((g) => FARM_LANES.has(g.lane));
-  if (farmGames.length === 0) return null;
-  const avg = farmGames.reduce((sum, g) => sum + g.cs20, 0) / farmGames.length;
-  const detail = `CS moyen à 20 min : ${Math.round(avg)} (Top/Mid/Bot, ${farmGames.length} game${farmGames.length > 1 ? "s" : ""})`;
-  if (avg < 130) return { id: "farm", severity: "red", text: "Gros manque de farm !", detail };
-  if (avg < 140) return { id: "farm", severity: "yellow", text: "Manque de farm", detail };
+  if (farmGames.length === 0 || targets.csPerMin === null) return null;
+  const avg = averageCsPerMin(farmGames.map((g) => csMetrics(g).perMinPre20));
+  if (avg === null) return null;
+  const detail = `${avg} CS/min avant 20 min en moyenne (Top/Mid/Bot, ${farmGames.length} game${farmGames.length > 1 ? "s" : ""}) — cible du palier : ${targets.csPerMin}`;
+  const band = csPerMinBand(avg, targets.csPerMin);
+  if (band === "bad") return { id: "farm", severity: "red", text: "Gros manque de farm !", detail };
+  if (band === "warn") return { id: "farm", severity: "yellow", text: "Manque de farm", detail };
   return null;
 }
 
@@ -129,16 +165,19 @@ function LoadingDots() {
 
 function GameRow({
   game,
+  targets,
   championIconUrl,
   formatGameDate,
 }: {
   game: RiotGame;
+  targets: Targets;
   championIconUrl: (champion: string) => string | null;
   formatGameDate: (iso: string) => string;
 }) {
   const win = game.result.toLowerCase().startsWith("v");
   const icon = championIconUrl(game.champion);
   const opponentIcon = game.matchup ? championIconUrl(game.matchup) : null;
+  const { perMinPre20, perMinPost20 } = csMetrics(game);
 
   return (
     <div
@@ -185,12 +224,16 @@ function GameRow({
       <p className={"w-16 text-center text-sm font-semibold " + (win ? "text-green-400" : "text-red-400")}>
         {win ? "Victoire" : "Défaite"}
       </p>
-      <div className={"hidden w-16 rounded px-1 py-0.5 text-center text-sm sm:block " + csClass(game.cs20)}>
-        <p className="text-[10px] opacity-80">CS@20</p>
-        <p>{game.cs20}</p>
+      <div className={"hidden w-20 rounded px-1 py-0.5 text-center text-sm sm:block " + csPerMinClass(perMinPre20, targets.csPerMin)}>
+        <p className="text-[10px] leading-tight opacity-80">CS/min à 20min</p>
+        <p>{perMinPre20 ?? "—"}</p>
       </div>
-      <div className={"hidden w-20 rounded px-1 py-0.5 text-center text-sm sm:block " + deathsClass(game.deaths10)}>
-        <p className="text-[10px] opacity-80">Morts/10m</p>
+      <div className={"hidden w-20 rounded px-1 py-0.5 text-center text-sm sm:block " + csPerMinClass(perMinPost20, targets.csPerMin)}>
+        <p className="text-[10px] leading-tight opacity-80">CS/min après 20min</p>
+        <p>{perMinPost20 ?? "—"}</p>
+      </div>
+      <div className={"hidden w-20 rounded px-1 py-0.5 text-center text-sm sm:block " + deaths10Class(game.deaths10, targets.deaths10)}>
+        <p className="text-[10px] leading-tight opacity-80">Morts/10m</p>
         <p>{game.deaths10}</p>
       </div>
     </div>
@@ -255,7 +298,7 @@ export default function Home() {
       .catch(() => setDdragonVersion(null));
   }, []);
 
-  const search = async (riotId: string, chosenFilter: Filter): Promise<RiotGame[] | null> => {
+  const search = async (riotId: string, chosenFilter: Filter): Promise<SearchResult | null> => {
     setLoading(true);
     setError(null);
     setShowOlder(false);
@@ -265,7 +308,7 @@ export default function Home() {
       setGames(body.games);
       setRank(body.rank);
       setFilter(chosenFilter);
-      return body.games;
+      return body;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Recherche impossible (réseau).");
       return null;
@@ -283,9 +326,10 @@ export default function Home() {
     }
     const riotId = `${parsed.gameName}#${parsed.tagLine}`;
     // La recherche initiale est déjà filtrée sur "soloq" : on réutilise son
-    // résultat pour le winrate au lieu de le redemander à l'API.
-    const soloqGames = await search(riotId, "soloq");
-    if (soloqGames) handleAnalyze(riotId, soloqGames);
+    // résultat (games ET rang) pour le winrate et les cibles de palier au
+    // lieu de le redemander à l'API.
+    const initial = await search(riotId, "soloq");
+    if (initial) handleAnalyze(riotId, initial);
   };
 
   const handleFilterChange = (nextFilter: Filter) => {
@@ -320,19 +364,22 @@ export default function Home() {
   // (SoloQ + Flex) sert de base pour les autres règles : filtré côté Riot,
   // donc rapide — contrairement à "all" qui doit scanner et jeter les ARAM
   // une par une. Dans les deux cas, seules les games de moins de 2 mois
-  // entrent dans les moyennes. Si les games soloq viennent d'être chargées
-  // par la recherche, on les réutilise au lieu de refaire l'appel.
-  const handleAnalyze = async (riotId: string, preloadedSoloqGames?: RiotGame[]) => {
+  // entrent dans les moyennes. Les games soloq déjà chargées par la recherche
+  // sont réutilisées au lieu de refaire l'appel ; leur rang sert aussi à
+  // résoudre les cibles de palier des bannières farm / morts.
+  const handleAnalyze = async (riotId: string, initial: SearchResult) => {
     setAnalyzing(true);
     setAnalyzeError(null);
     setBanners([]);
     setTiltAlert(false);
 
+    const targets = resolveTargets(initial.games, initial.rank);
+
     const onFail = (err: unknown) => {
       setAnalyzeError(err instanceof Error ? err.message : "Analyse impossible (réseau).");
     };
 
-    const soloqTask = (preloadedSoloqGames ? Promise.resolve({ games: preloadedSoloqGames }) : fetchGames(riotId, "soloq")).then((data) => {
+    const soloqTask = Promise.resolve(initial).then((data) => {
       const recent = filterRecent(data.games);
       const banner = winrateBanner(recent);
       if (banner) setBanners((prev) => sortBanners([...prev, banner]));
@@ -342,8 +389,8 @@ export default function Home() {
       const recent = filterRecent(data.games);
       const extra = [
         championDiversityBanner(recent),
-        deathsBanner(recent),
-        farmBanner(recent),
+        deathsBanner(recent, targets),
+        farmBanner(recent, targets),
       ].filter((b): b is Banner => b !== null);
       if (extra.length > 0) setBanners((prev) => sortBanners([...prev, ...extra]));
       setTiltAlert(isTilted(recent));
@@ -361,6 +408,7 @@ export default function Home() {
 
   const recentGames = games.filter((g) => isRecent(g.played_at));
   const olderGames = games.filter((g) => !isRecent(g.played_at));
+  const targets = resolveTargets(games, rank);
 
   if (checkingSession) {
     return (
@@ -528,7 +576,7 @@ export default function Home() {
                   ) : (
                     <>
                       {recentGames.map((game) => (
-                        <GameRow key={game.riot_match_id} game={game} championIconUrl={championIconUrl} formatGameDate={formatGameDate} />
+                        <GameRow key={game.riot_match_id} game={game} targets={targets} championIconUrl={championIconUrl} formatGameDate={formatGameDate} />
                       ))}
                       {recentGames.length === 0 && olderGames.length > 0 && (
                         <p className="text-center text-slate-400">Aucune game de moins de 2 mois pour ce filtre.</p>
@@ -545,7 +593,7 @@ export default function Home() {
                       )}
                       {showOlder &&
                         olderGames.map((game) => (
-                          <GameRow key={game.riot_match_id} game={game} championIconUrl={championIconUrl} formatGameDate={formatGameDate} />
+                          <GameRow key={game.riot_match_id} game={game} targets={targets} championIconUrl={championIconUrl} formatGameDate={formatGameDate} />
                         ))}
                     </>
                   )}

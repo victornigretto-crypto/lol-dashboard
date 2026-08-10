@@ -3,7 +3,8 @@ import React, { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { csClass, deathsClass } from "@/lib/stats";
+import { csMetrics, csPerMinClass, deaths10Class } from "@/lib/stats";
+import { getContent, roleFromLane, tierFromRiotTier } from "@/lib/content";
 
 type Game = {
   id: string;
@@ -13,6 +14,8 @@ type Game = {
   result: string;
   cs20: number;
   deaths10: number;
+  cs_final: number | null;
+  game_duration_seconds: number | null;
   errorLane: string[];
   errorMacro: string[];
   errorFight: string[];
@@ -27,11 +30,21 @@ type GameRow = {
   result: string;
   cs20: number;
   deaths10: number;
+  cs_final: number | null;
+  game_duration_seconds: number | null;
   error_lane: string[];
   error_macro: string[];
   error_fight: string[];
   summary: string;
 };
+
+type Rank = { tier: string; rank: string; leaguePoints: number } | null;
+
+// Cibles de performance du palier du joueur (lib/content). `null` = rôle ou
+// palier sans contenu défini : aucune couleur, plutôt qu'une fausse couleur.
+type Targets = { csPerMin: number | null; deaths10: number | null };
+
+const NO_TARGETS: Targets = { csPerMin: null, deaths10: null };
 
 // Les listes d'erreurs sont stockées en base sans case vide ; l'UI ajoute
 // toujours un champ vide en fin de liste pour permettre d'en saisir une nouvelle.
@@ -49,19 +62,17 @@ const fromRow = (row: GameRow): Game => ({
   result: row.result,
   cs20: row.cs20,
   deaths10: row.deaths10,
+  cs_final: row.cs_final,
+  game_duration_seconds: row.game_duration_seconds,
   errorLane: toDisplayList(row.error_lane),
   errorMacro: toDisplayList(row.error_macro),
   errorFight: toDisplayList(row.error_fight),
   summary: row.summary,
 });
 
+// Seuls les champs réellement saisis par le joueur repartent en base : tout
+// le reste vient de l'import Riot et ne doit jamais être réécrit d'ici.
 const toUpdatePayload = (game: Game) => ({
-  lane: game.lane,
-  champion: game.champion,
-  matchup: game.matchup,
-  result: game.result,
-  cs20: game.cs20,
-  deaths10: game.deaths10,
   error_lane: toStoredList(game.errorLane),
   error_macro: toStoredList(game.errorMacro),
   error_fight: toStoredList(game.errorFight),
@@ -77,6 +88,7 @@ export default function SuiviPage() {
   const [games, setGames] = useState<Game[]>([]);
   const [loading, setLoading] = useState(true);
   const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [targets, setTargets] = useState<Targets>(NO_TARGETS);
 
   const gamesRef = useRef<Game[]>([]);
   const saveTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
@@ -95,10 +107,44 @@ export default function SuiviPage() {
       if (!active) return;
       setUserEmail(user?.email ?? null);
 
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("riot_id, primary_role, former_rank")
+        .eq("user_id", user?.id ?? "")
+        .maybeSingle();
+      if (!active) return;
+
+      // Un seul appel sert deux besoins : il importe (et persiste) les games
+      // manquantes de CE compte lié, et renvoie le rang league-v4 dont on a
+      // besoin pour cibler les couleurs. L'échec n'est pas bloquant : le
+      // cockpit s'affiche avec ce qui est déjà en base, sans couleurs.
+      let rank: Rank = null;
+      if (profile?.riot_id) {
+        try {
+          const res = await fetch("/api/riot/import", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ riotId: profile.riot_id, filter: "soloq" }),
+          });
+          if (res.ok) rank = ((await res.json()).rank ?? null) as Rank;
+        } catch {
+          // hors ligne / API Riot indisponible : on continue sur le cache.
+        }
+      }
+      if (!active) return;
+
+      // Le palier de référence est le rang SoloQ courant ; à défaut (non
+      // classé), l'ancien rang saisi à l'onboarding.
+      const role = roleFromLane(profile?.primary_role);
+      if (role) {
+        const content = getContent(role, tierFromRiotTier(rank?.tier ?? profile?.former_rank));
+        setTargets({ csPerMin: content.csPerMinTarget, deaths10: content.deaths10Target });
+      }
+
       const { data, error } = await supabase
         .from("games")
         .select("*")
-        .order("created_at", { ascending: true });
+        .order("played_at", { ascending: false, nullsFirst: false });
 
       if (!active) return;
       if (error) {
@@ -134,17 +180,11 @@ export default function SuiviPage() {
     );
   };
 
-  const updateField = (
-    id: string,
-    field: "lane" | "champion" | "matchup" | "result" | "summary",
-    value: string
-  ) => {
-    setGames((prev) => prev.map((g) => (g.id === id ? { ...g, [field]: value } : g)));
-    scheduleSave(id);
-  };
-
-  const updateNumberField = (id: string, field: "cs20" | "deaths10", value: number) => {
-    setGames((prev) => prev.map((g) => (g.id === id ? { ...g, [field]: value } : g)));
+  // Le résumé est le seul champ texte libre hors listes d'erreurs ; lane,
+  // champion, matchup, résultat et stats viennent de l'import et ne sont plus
+  // éditables (Slice 4).
+  const updateSummary = (id: string, value: string) => {
+    setGames((prev) => prev.map((g) => (g.id === id ? { ...g, summary: value } : g)));
     scheduleSave(id);
   };
 
@@ -164,33 +204,6 @@ export default function SuiviPage() {
       })
     );
     scheduleSave(id);
-  };
-
-  const addGame = async () => {
-    const { data, error } = await supabase
-      .from("games")
-      .insert({})
-      .select()
-      .single();
-    if (error) {
-      console.error("Impossible de créer la game", error);
-      return;
-    }
-    setGames((prev) => [...prev, fromRow(data as GameRow)]);
-  };
-
-  const deleteGame = async (id: string) => {
-    const timer = saveTimers.current.get(id);
-    if (timer) {
-      clearTimeout(timer);
-      saveTimers.current.delete(id);
-    }
-    const { error } = await supabase.from("games").delete().eq("id", id);
-    if (error) {
-      console.error("Impossible de supprimer la game", error);
-      return;
-    }
-    setGames((prev) => prev.filter((g) => g.id !== id));
   };
 
   const handleLogout = async () => {
@@ -243,69 +256,55 @@ export default function SuiviPage() {
                     <th className="w-28 px-2 py-2">Champion</th>
                     <th className="w-28 px-2 py-2">Matchup</th>
                     <th className="w-8 px-2 py-2 text-center">V/D</th>
-                    <th className="w-20 px-2 py-2">Csà20mins</th>
+                    <th className="w-20 px-2 py-2 text-center"><div className="whitespace-normal">CS/min<br/>à 20min</div></th>
+                    <th className="w-20 px-2 py-2 text-center"><div className="whitespace-normal">CS/min<br/>après 20min</div></th>
                     <th className="w-20 px-2 py-2 text-center"><div className="whitespace-normal">Mort<br/>10m</div></th>
                     <th className="w-48 px-2 py-2">Erreur Lane</th>
                     <th className="w-48 px-2 py-2">Erreur Macro</th>
                     <th className="w-48 px-2 py-2">Erreur Fight</th>
                     <th className="w-64 px-2 py-2">Résumé</th>
-                    <th className="w-8 px-2 py-2" />
                   </tr>
                 </thead>
                 <tbody>
                   {games.map((game, gameIndex) => (
                     <tr key={game.id} className="border-b border-slate-800 hover:bg-slate-800/50 align-top">
                       <td className="w-8 px-2 py-3 text-slate-100 text-center">{gameIndex + 1}</td>
-                      <td className="w-20 px-2 py-3">
-                        <input
-                          type="text"
-                          value={game.lane}
-                          onChange={(e) => updateField(game.id, "lane", e.target.value)}
-                          className="w-full rounded border border-slate-700 bg-slate-900/60 px-2 py-1 text-xs text-slate-100"
-                        />
-                      </td>
-                      <td className="w-28 px-2 py-3">
-                        <input
-                          type="text"
-                          value={game.champion}
-                          onChange={(e) => updateField(game.id, "champion", e.target.value)}
-                          className="w-full rounded border border-slate-700 bg-slate-900/60 px-2 py-1 text-xs text-slate-100"
-                        />
-                      </td>
-                      <td className="w-28 px-2 py-3">
-                        <input
-                          type="text"
-                          value={game.matchup}
-                          onChange={(e) => updateField(game.id, "matchup", e.target.value)}
-                          className="w-full rounded border border-slate-700 bg-slate-900/60 px-2 py-1 text-xs text-slate-100"
-                        />
-                      </td>
+                      <td className="w-20 px-2 py-3 text-slate-200">{game.lane}</td>
+                      <td className="w-28 px-2 py-3 text-slate-200">{game.champion}</td>
+                      <td className="w-28 px-2 py-3 text-slate-200">{game.matchup}</td>
                       <td className="w-8 px-2 py-3 text-center">
-                        <select
-                          value={game.result}
-                          onChange={(e) => updateField(game.id, "result", e.target.value)}
-                          className={getResultClass(game.result) + " rounded px-1 py-0.5 text-xs"}
+                        <span className={getResultClass(game.result) + " rounded px-1.5 py-0.5 text-xs"}>
+                          {game.result.toLowerCase().startsWith("v") ? "V" : "D"}
+                        </span>
+                      </td>
+                      <td className="w-20 px-2 py-3 text-center">
+                        <span
+                          className={
+                            csPerMinClass(csMetrics(game).perMinPre20, targets.csPerMin) +
+                            " block rounded px-2 py-0.5 text-xs"
+                          }
                         >
-                          <option value="Victoire">V</option>
-                          <option value="Défaite">D</option>
-                        </select>
+                          {csMetrics(game).perMinPre20 ?? "—"}
+                        </span>
                       </td>
                       <td className="w-20 px-2 py-3 text-center">
-                        <input
-                          type="number"
-                          value={game.cs20}
-                          onChange={(e) => updateNumberField(game.id, "cs20", Number(e.target.value))}
-                          className={csClass(game.cs20) + " w-full rounded px-2 py-0.5 text-xs text-center"}
-                        />
+                        <span
+                          className={
+                            csPerMinClass(csMetrics(game).perMinPost20, targets.csPerMin) +
+                            " block rounded px-2 py-0.5 text-xs"
+                          }
+                        >
+                          {csMetrics(game).perMinPost20 ?? "—"}
+                        </span>
                       </td>
                       <td className="w-20 px-2 py-3 text-center">
-                        <input
-                          type="number"
-                          step="0.1"
-                          value={game.deaths10}
-                          onChange={(e) => updateNumberField(game.id, "deaths10", Number(e.target.value))}
-                          className={deathsClass(game.deaths10) + " w-full rounded px-2 py-0.5 text-xs text-center"}
-                        />
+                        <span
+                          className={
+                            deaths10Class(game.deaths10, targets.deaths10) + " block rounded px-2 py-0.5 text-xs"
+                          }
+                        >
+                          {game.deaths10}
+                        </span>
                       </td>
                       <td className="w-48 px-2 py-3 align-top">
                         {game.errorLane.map((text, index) => (
@@ -348,18 +347,9 @@ export default function SuiviPage() {
                           rows={3}
                           className="h-full w-full resize-y rounded border border-slate-700 bg-slate-900/60 px-2 py-1 text-xs text-slate-100"
                           value={game.summary}
-                          onChange={(e) => updateField(game.id, "summary", e.target.value)}
+                          onChange={(e) => updateSummary(game.id, e.target.value)}
                           placeholder="Résumé / conclusion"
                         />
-                      </td>
-                      <td className="w-8 px-2 py-3 text-center align-top">
-                        <button
-                          onClick={() => deleteGame(game.id)}
-                          className="text-slate-500 hover:text-red-400"
-                          title="Supprimer cette game"
-                        >
-                          ×
-                        </button>
                       </td>
                     </tr>
                   ))}
@@ -367,17 +357,10 @@ export default function SuiviPage() {
               </table>
               {games.length === 0 && (
                 <p className="p-4 text-center text-slate-400">
-                  Aucune game enregistrée. Ajoute ta première game !
+                  Aucune game pour l&apos;instant. Joue une SoloQ : elle apparaîtra ici automatiquement.
                 </p>
               )}
             </div>
-
-            <button
-              onClick={addGame}
-              className="mt-3 rounded border border-slate-700 px-3 py-2 text-sm hover:bg-slate-800"
-            >
-              + Ajouter une game
-            </button>
           </>
         )}
       </section>
