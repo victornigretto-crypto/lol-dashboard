@@ -92,11 +92,22 @@ export function getMatch(matchId: string) {
   return riotFetch<MatchDto>(REGIONAL_HOST, `/lol/match/v5/matches/${matchId}`);
 }
 
+// `events` porte notamment les CHAMPION_KILL, seule source de l'HORAIRE des
+// morts : le Match-V5 ne donne qu'un total. C'est ce qui permet de pondérer
+// les morts de fin de partie (cf. lib/stats). Aucun appel supplémentaire —
+// la timeline est déjà téléchargée pour le CS à 20 min.
+export type TimelineEvent = {
+  type: string;
+  timestamp: number;
+  victimId?: number;
+};
+
 export type MatchTimelineDto = {
   info: {
     frames: Array<{
       timestamp: number;
       participantFrames: Record<string, { minionsKilled: number; jungleMinionsKilled: number }>;
+      events?: TimelineEvent[];
     }>;
   };
 };

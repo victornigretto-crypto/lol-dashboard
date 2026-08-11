@@ -12,6 +12,35 @@
   --font-mono: var(--font-geist-mono);
 }
 
+/* Surbrillance des stats prioritaires du palier (lib/stats -> highlightClass).
+   Le liseré s'allume et s'éteint ; le texte, lui, ne bouge pas — un
+   `animate-pulse` aurait fait clignoter la valeur elle-même, donc illisible.
+   C'est l'animation qui dessine le liseré, pas un `ring-*` : les deux
+   utilisent box-shadow et se remplaceraient l'un l'autre. */
+@theme {
+  --animate-stat-blink: stat-blink 1.4s ease-in-out infinite;
+
+  @keyframes stat-blink {
+    0%,
+    100% {
+      box-shadow: 0 0 0 2px var(--color-blue-400);
+    }
+    50% {
+      box-shadow: 0 0 0 2px transparent;
+    }
+  }
+}
+
+/* Clignoter en continu est pénible, voire déclencheur, pour une partie des
+   utilisateurs : quand l'OS demande moins d'animations, on garde le liseré
+   fixe — la stat reste signalée, sans mouvement. */
+@media (prefers-reduced-motion: reduce) {
+  .animate-stat-blink {
+    animation: none;
+    box-shadow: 0 0 0 2px var(--color-blue-400);
+  }
+}
+
 @media (prefers-color-scheme: dark) {
   :root {
     --background: #0a0a0a;

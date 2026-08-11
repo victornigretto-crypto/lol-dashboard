@@ -9,8 +9,6 @@ export const FALLBACK_CONTENT: TierContent = {
   highlightStats: [],
   bucketThemes: {},
   fieldQuestions: { lane: "Erreur en lane", fight: "Erreur en fight", macro: "Erreur de macro" },
-  csPerMinTarget: null,
-  deaths10Target: null,
 };
 
 const MID_CONTENT: Partial<Record<Tier, TierContent>> = {
@@ -29,8 +27,6 @@ const MID_CONTENT: Partial<Record<Tier, TierContent>> = {
       fight: "Comment et pourquoi es-tu mort en fight ?",
       macro: "As-tu détruit des tours ? Ou Aram mid ?",
     },
-    csPerMinTarget: 7.0,
-    deaths10Target: 1.5, // PLACEHOLDER — à valider par Victor
   },
   bronze: {
     inDevelopment: false,
@@ -48,8 +44,6 @@ const MID_CONTENT: Partial<Record<Tier, TierContent>> = {
       fight: "Pourquoi et comment es-tu mort en fight ?",
       macro: "As-tu cassé des tours ? Ou Aram mid ?",
     },
-    csPerMinTarget: 7.5,
-    deaths10Target: 1.5, // PLACEHOLDER — à valider par Victor
   },
   silver: {
     inDevelopment: false,
@@ -66,8 +60,6 @@ const MID_CONTENT: Partial<Record<Tier, TierContent>> = {
       fight: "As-tu été pris sur un timing d'objectif ? Pourquoi ?",
       macro: "As-tu oublié de jouer un objectif ? Lequel ?",
     },
-    csPerMinTarget: 7.5, // PLACEHOLDER — à valider par Victor
-    deaths10Target: 1.3, // PLACEHOLDER — à valider par Victor
   },
   gold: {
     inDevelopment: false,
@@ -85,8 +77,6 @@ const MID_CONTENT: Partial<Record<Tier, TierContent>> = {
       fight: "As-tu contesté les objectifs ?",
       macro: "As-tu side lane après 14 min ?",
     },
-    csPerMinTarget: 8.0, // PLACEHOLDER — à valider par Victor
-    deaths10Target: 1.2, // PLACEHOLDER — à valider par Victor
   },
   platinum: {
     inDevelopment: false,
@@ -108,8 +98,6 @@ const MID_CONTENT: Partial<Record<Tier, TierContent>> = {
       fight: "Comment et pourquoi es-tu mort en fight ?",
       macro: "Pourquoi as-tu loupé tes objectifs ?",
     },
-    csPerMinTarget: 8.0, // PLACEHOLDER — à valider par Victor
-    deaths10Target: 1.1, // PLACEHOLDER — à valider par Victor
   },
   emerald: {
     inDevelopment: false,
@@ -132,8 +120,6 @@ const MID_CONTENT: Partial<Record<Tier, TierContent>> = {
       fight: "Comment es-tu mort en fight ?",
       macro: "As-tu throw ta game, ou failli la throw ? Comment ?",
     },
-    csPerMinTarget: 8.5, // PLACEHOLDER — à valider par Victor
-    deaths10Target: 1.0, // PLACEHOLDER — à valider par Victor
   },
 };
 

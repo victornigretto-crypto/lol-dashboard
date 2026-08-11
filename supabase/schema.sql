@@ -96,3 +96,17 @@ alter table public.games add column if not exists game_duration_seconds numeric;
 -- melange. Nullable : les games importees avant cette colonne restent en base
 -- mais ne s'affichent plus, jusqu'a ce qu'un reimport les reetiquette.
 alter table public.games add column if not exists puuid text;
+
+-- Morts : le total de la partie, et combien sont survenues dans les 5
+-- dernieres minutes. `deaths10` (le rythme affiche) ne suffisait pas : pour
+-- ne compter qu'a moitie les morts de fin de partie -- celles qui pesent le
+-- prix d'un objectif plutot qu'une faute de lane -- il faut savoir QUAND on
+-- est mort, et le Match-V5 ne donne qu'un total. L'horaire vient des events
+-- CHAMPION_KILL de la timeline, deja telechargee pour le CS a 20 min : zero
+-- appel Riot en plus.
+-- On stocke les faits bruts, jamais la ponderation elle-meme : la regle peut
+-- changer, l'historique des morts, non.
+-- Nullable : les games importees avant ces colonnes gardent leur couleur
+-- calculee sur le rythme brut, jusqu'a ce qu'un reimport les complete.
+alter table public.games add column if not exists deaths integer;
+alter table public.games add column if not exists deaths_last5 integer;

@@ -3,28 +3,23 @@ import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import {
-  averageCsPerMin,
-  csMetrics,
-  csPerMinBand,
-  csPerMinClass,
-  deaths10Band,
-  deaths10Class,
-  highlightClass,
-  targetsOf,
-  type Targets,
-} from "@/lib/stats";
+import { FARM_LANES, performanceBanners, sortBanners, type Banner } from "@/lib/banners";
 import {
   dominantRole,
   FALLBACK_CONTENT,
   getContent,
+  thresholdsOf,
   tierFromRiotTier,
   type TierContent,
+  type TierThresholds,
 } from "@/lib/content";
 import { championIconUrl, useDdragonVersion } from "@/lib/ddragon";
 import { rememberRiotId } from "@/lib/pendingRiotId";
 import { rankEmblemUrl, rankLabel } from "@/lib/riot/rank";
-import { formatGameDate, parseRiotId } from "@/lib/riot/transform";
+import { formatDuration, formatGameDate, parseRiotId } from "@/lib/riot/transform";
+import { AnalysisPanel } from "./_components/AnalysisPanel";
+import { LoadingDots } from "./_components/LoadingDots";
+import { StatCells } from "./_components/StatCells";
 
 type RiotGame = {
   riot_match_id: string;
@@ -38,6 +33,8 @@ type RiotGame = {
   played_at: string;
   cs_final: number | null;
   game_duration_seconds: number | null;
+  deaths: number | null;
+  deaths_last5: number | null;
 };
 
 type Rank = {
@@ -66,22 +63,17 @@ function resolveContent(games: RiotGame[], rank: Rank | null): TierContent {
   return getContent(role, tierFromRiotTier(rank?.tier));
 }
 
-type Severity = "red" | "yellow" | "green";
-type Banner = { id: string; severity: Severity; text: string; detail: string };
+// Les seuils de couleur, eux, ne dépendent que du palier : pas besoin de
+// connaître le rôle pour les résoudre.
+function resolveThresholds(rank: Rank | null): TierThresholds | null {
+  return thresholdsOf(tierFromRiotTier(rank?.tier));
+}
 
 const FILTERS: { key: Filter; label: string }[] = [
   { key: "soloq", label: "SoloQ uniquement" },
   { key: "all", label: "Normal & Classés" },
   { key: "ranked", label: "Flex & Solo duo" },
 ];
-
-const SEVERITY_ORDER: Record<Severity, number> = { red: 0, yellow: 1, green: 2 };
-const SEVERITY_CLASS: Record<Severity, string> = {
-  red: "bg-red-600 text-white",
-  yellow: "bg-yellow-500 text-black",
-  green: "bg-green-600 text-white",
-};
-const FARM_LANES = new Set(["Top", "Mid", "Bot"]);
 
 async function fetchGames(riotId: string, filter: Filter): Promise<SearchResult> {
   const res = await fetch("/api/riot/import", {
@@ -92,10 +84,6 @@ async function fetchGames(riotId: string, filter: Filter): Promise<SearchResult>
   const body = await res.json();
   if (!res.ok) throw new Error(body.error ?? "Requête impossible.");
   return body as SearchResult;
-}
-
-function sortBanners(list: Banner[]): Banner[] {
-  return [...list].sort((a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity]);
 }
 
 // Une game est "récente" si elle date de moins de 2 mois : au-delà, elle est
@@ -129,60 +117,28 @@ function championDiversityBanner(games: RiotGame[]): Banner | null {
   return null;
 }
 
-// Comme les couleurs du tableau, ces deux bannières se jugent par rapport à
-// la cible du palier et non sur une échelle absolue : sans cible connue
-// (palier sans contenu), on ne dit rien plutôt que de dire faux.
-function deathsBanner(games: RiotGame[], targets: Targets): Banner | null {
-  if (games.length === 0 || targets.deaths10 === null) return null;
-  const avg = games.reduce((sum, g) => sum + g.deaths10, 0) / games.length;
-  const detail = `${avg.toFixed(1)} morts/10min en moyenne sur tes ${games.length} dernières classées (cible du palier : ${targets.deaths10})`;
-  const band = deaths10Band(avg, targets.deaths10);
-  if (band === "bad") return { id: "deaths", severity: "red", text: "Beaucoup trop de morts", detail };
-  if (band === "warn") return { id: "deaths", severity: "yellow", text: "Trop de morts", detail };
-  return null;
-}
-
-function farmBanner(games: RiotGame[], targets: Targets): Banner | null {
-  const farmGames = games.filter((g) => FARM_LANES.has(g.lane));
-  if (farmGames.length === 0 || targets.csPerMin === null) return null;
-  const avg = averageCsPerMin(farmGames.map((g) => csMetrics(g).perMinPre20));
-  if (avg === null) return null;
-  const detail = `${avg} CS/min avant 20 min en moyenne (Top/Mid/Bot, ${farmGames.length} game${farmGames.length > 1 ? "s" : ""}) — cible du palier : ${targets.csPerMin}`;
-  const band = csPerMinBand(avg, targets.csPerMin);
-  if (band === "bad") return { id: "farm", severity: "red", text: "Gros manque de farm !", detail };
-  if (band === "warn") return { id: "farm", severity: "yellow", text: "Manque de farm", detail };
-  return null;
-}
+// Les bandeaux de farm et de morts vivent dans lib/banners : ils sont
+// partagés avec /suivi et se jugent sur les mêmes seuils de palier que les
+// couleurs du tableau.
 
 function isTilted(games: RiotGame[]): boolean {
   return games.some((g) => g.queue === "SoloQ" && FARM_LANES.has(g.lane) && g.deaths10 >= 4);
 }
 
-function LoadingDots() {
-  return (
-    <span className="inline-flex items-center gap-1 align-middle">
-      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-500 [animation-delay:-0.3s]" />
-      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-500 [animation-delay:-0.15s]" />
-      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-500" />
-    </span>
-  );
-}
-
 function GameRow({
   game,
-  targets,
+  thresholds,
   content,
   ddragonVersion,
 }: {
   game: RiotGame;
-  targets: Targets;
+  thresholds: TierThresholds | null;
   content: TierContent;
   ddragonVersion: string | null;
 }) {
   const win = game.result.toLowerCase().startsWith("v");
   const icon = championIconUrl(ddragonVersion, game.champion);
   const opponentIcon = championIconUrl(ddragonVersion, game.matchup);
-  const { perMinPre20, perMinPost20 } = csMetrics(game);
 
   return (
     <div
@@ -222,43 +178,14 @@ function GameRow({
       <div className="min-w-0 flex-1">
         <p className="truncate font-medium">{game.champion}</p>
         <p className="text-xs text-slate-400">
-          {game.lane} · {game.queue}
+          {[game.lane, game.queue, formatDuration(game.game_duration_seconds)].filter(Boolean).join(" · ")}
         </p>
       </div>
 
       <p className={"w-16 text-center text-sm font-semibold " + (win ? "text-green-400" : "text-red-400")}>
         {win ? "Victoire" : "Défaite"}
       </p>
-      <div
-        className={
-          "hidden w-20 rounded px-1 py-0.5 text-center text-sm sm:block " +
-          csPerMinClass(perMinPre20, targets.csPerMin) +
-          highlightClass(content, "csPre20")
-        }
-      >
-        <p className="text-[10px] leading-tight opacity-80">CS/min à 20min</p>
-        <p>{perMinPre20 ?? "—"}</p>
-      </div>
-      <div
-        className={
-          "hidden w-20 rounded px-1 py-0.5 text-center text-sm sm:block " +
-          csPerMinClass(perMinPost20, targets.csPerMin) +
-          highlightClass(content, "csPost20")
-        }
-      >
-        <p className="text-[10px] leading-tight opacity-80">CS/min après 20min</p>
-        <p>{perMinPost20 ?? "—"}</p>
-      </div>
-      <div
-        className={
-          "hidden w-20 rounded px-1 py-0.5 text-center text-sm sm:block " +
-          deaths10Class(game.deaths10, targets.deaths10) +
-          highlightClass(content, "deaths10")
-        }
-      >
-        <p className="text-[10px] leading-tight opacity-80">Morts/10m</p>
-        <p>{game.deaths10}</p>
-      </div>
+      <StatCells game={game} thresholds={thresholds} content={content} hideOnMobile />
     </div>
   );
 }
@@ -279,7 +206,6 @@ export default function Home() {
   const [analyzing, setAnalyzing] = useState(false);
   const [analyzeError, setAnalyzeError] = useState<string | null>(null);
   const [banners, setBanners] = useState<Banner[]>([]);
-  const [expandedBanners, setExpandedBanners] = useState<Set<string>>(new Set());
   const [tiltAlert, setTiltAlert] = useState(false);
   const [showOlder, setShowOlder] = useState(false);
 
@@ -363,19 +289,9 @@ export default function Home() {
     setError(null);
     setRiotIdInput("");
     setBanners([]);
-    setExpandedBanners(new Set());
     setTiltAlert(false);
     setAnalyzeError(null);
     setShowOlder(false);
-  };
-
-  const toggleBanner = (id: string) => {
-    setExpandedBanners((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
   };
 
   // Deux jeux de données indépendants, traités en parallèle : le winrate
@@ -392,7 +308,7 @@ export default function Home() {
     setBanners([]);
     setTiltAlert(false);
 
-    const targets = targetsOf(resolveContent(initial.games, initial.rank));
+    const thresholds = resolveThresholds(initial.rank);
 
     const onFail = (err: unknown) => {
       setAnalyzeError(err instanceof Error ? err.message : "Analyse impossible (réseau).");
@@ -407,10 +323,9 @@ export default function Home() {
     const rankedTask = fetchGames(riotId, "ranked").then((data) => {
       const recent = filterRecent(data.games);
       const extra = [
-        championDiversityBanner(recent),
-        deathsBanner(recent, targets),
-        farmBanner(recent, targets),
-      ].filter((b): b is Banner => b !== null);
+        ...performanceBanners(recent, thresholds),
+        ...[championDiversityBanner(recent)].filter((b): b is Banner => b !== null),
+      ];
       if (extra.length > 0) setBanners((prev) => sortBanners([...prev, ...extra]));
       setTiltAlert(isTilted(recent));
     }, onFail);
@@ -422,7 +337,7 @@ export default function Home() {
   const recentGames = games.filter((g) => isRecent(g.played_at));
   const olderGames = games.filter((g) => !isRecent(g.played_at));
   const content = resolveContent(games, rank);
-  const targets = targetsOf(content);
+  const thresholds = resolveThresholds(rank);
 
   if (checkingSession) {
     return (
@@ -490,41 +405,7 @@ export default function Home() {
                 </button>
               </div>
 
-              <aside className="rounded-2xl border border-slate-700 bg-slate-900/60 p-4">
-                <h2 className="flex items-center gap-2 text-lg font-semibold text-slate-200">
-                  Analyse
-                  {analyzing && <LoadingDots />}
-                </h2>
-                {banners.length > 0 ? (
-                  <div className="mt-3 flex flex-col gap-2">
-                    {banners.map((b) => {
-                      const expanded = expandedBanners.has(b.id);
-                      return (
-                        <button
-                          key={b.id}
-                          onClick={() => toggleBanner(b.id)}
-                          className={
-                            "w-full rounded-lg px-3 py-2 text-left text-sm font-semibold transition " +
-                            SEVERITY_CLASS[b.severity]
-                          }
-                        >
-                          <div className="flex items-center justify-between gap-2">
-                            <span>{b.text}</span>
-                            <span className={"text-xs transition-transform " + (expanded ? "rotate-180" : "")}>
-                              ▾
-                            </span>
-                          </div>
-                          {expanded && <p className="mt-1 text-xs font-normal opacity-90">{b.detail}</p>}
-                        </button>
-                      );
-                    })}
-                  </div>
-                ) : null}
-                {analyzeError && <p className="mt-3 text-sm text-red-400">{analyzeError}</p>}
-                {!analyzing && !analyzeError && banners.length === 0 && (
-                  <p className="mt-3 text-sm text-slate-400">Rien à signaler.</p>
-                )}
-              </aside>
+              <AnalysisPanel banners={banners} loading={analyzing} error={analyzeError} />
 
               {!content.inDevelopment && (
                 <div className="rounded-2xl border border-slate-700 bg-slate-900/60 p-4">
@@ -591,7 +472,7 @@ export default function Home() {
                   ) : (
                     <>
                       {recentGames.map((game) => (
-                        <GameRow key={game.riot_match_id} game={game} targets={targets} content={content} ddragonVersion={ddragonVersion} />
+                        <GameRow key={game.riot_match_id} game={game} thresholds={thresholds} content={content} ddragonVersion={ddragonVersion} />
                       ))}
                       {recentGames.length === 0 && olderGames.length > 0 && (
                         <p className="text-center text-slate-400">Aucune game de moins de 2 mois pour ce filtre.</p>
@@ -608,7 +489,7 @@ export default function Home() {
                       )}
                       {showOlder &&
                         olderGames.map((game) => (
-                          <GameRow key={game.riot_match_id} game={game} targets={targets} content={content} ddragonVersion={ddragonVersion} />
+                          <GameRow key={game.riot_match_id} game={game} thresholds={thresholds} content={content} ddragonVersion={ddragonVersion} />
                         ))}
                     </>
                   )}

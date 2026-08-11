@@ -19,7 +19,7 @@ gratuite et sans compte ; le suivi dans la durée demande un compte.
 
 ---
 
-## État actuel — 2026-08-10
+## État actuel — 2026-08-11
 
 **Stack :** Next.js 16.2.12 (App Router) · React 19.2.4 · Tailwind 4 · Supabase
 (auth + Postgres) · API Riot Games (dev key, EUW en dur).
@@ -36,10 +36,11 @@ gratuite et sans compte ; le suivi dans la durée demande un compte.
              les games et les 3 champs d'erreurs à remplir
 ```
 
-> ### Migrations à jour au 2026-08-10
-> `alter table public.games add column if not exists puuid text;` — **lancée et confirmée
-> par Victor** le 2026-08-10. Le schéma en base correspond donc à
-> [supabase/schema.sql](supabase/schema.sql), et le code sur `master` a ce qu'il lui faut.
+> ### Migrations à jour au 2026-08-11
+> Deux vagues, **toutes deux lancées et confirmées par Victor** :
+> `games.puuid` (2026-08-10), puis `games.deaths` + `games.deaths_last5` (2026-08-11).
+> Le schéma en base correspond donc à [supabase/schema.sql](supabase/schema.sql), et le
+> code sur `master` a ce qu'il lui faut.
 >
 > Rappel de fonctionnement : Victor lance le SQL lui-même dans Supabase → SQL Editor. Si
 > une session démarre sur une erreur de `/suivi` parlant d'une colonne manquante, c'est
@@ -57,11 +58,93 @@ liste pas ces colonnes, elles devraient donc être préservées).
 
 **Le trou principal :** le contenu pédagogique n'existe **que pour le rôle mid**, et
 seulement de **iron à emerald**. Tout le reste tombe sur `FALLBACK_CONTENT`
-(« En cours de développement ») : pas de cibles, donc pas de couleurs, donc un cockpit gris.
+(« En cours de développement ») : pas de focus, pas de questions d'erreurs sur mesure, pas
+de surbrillance. **Les couleurs, elles, ne dépendent plus du rôle** depuis le 2026-08-11 :
+un joueur top ou support a un tableau coloré même sans contenu écrit.
 
 ---
 
 ## Journal des sessions
+
+### 2026-08-11 — Seuils par palier, morts pondérées, bandeaux sur les deux pages
+
+Lot de demandes de Victor, livré d'un bloc. **Point de méthode qui a payé :** il a demandé
+de *vérifier s'il n'existait pas déjà un code prévu pour ça* avant de coder. Il en existait
+un, et trois des nouveautés demandées étaient des réécritures, pas des ajouts — les
+implémenter naïvement aurait créé deux systèmes de couleurs concurrents et des bandeaux en
+double.
+
+**1. Les seuils déménagent** → [lib/content/thresholds.ts](lib/content/thresholds.ts).
+Avant : une cible unique par palier dans `mid.ts`, le jaune déduit par un ratio (85 % pour
+le farm, 115 % pour les morts), et 10 valeurs marquées `PLACEHOLDER`. Maintenant : une
+table `Tier → { csPre20, csPost20, deaths10 }`, chaque seuil posé à la main. Trois
+changements de fond :
+
+- le CS/min a des seuils **différents avant et après 20 min** (impossible avant, il n'y
+  avait qu'une cible pour les deux) ;
+- les seuils dépendent du **palier seul, plus du rôle**. C'est ce qui débloque les couleurs
+  pour top / jungle / adc / support ;
+- **diamond → challenger reprennent les valeurs d'émeraude** (décision de Victor).
+  `unranked` reste sans seuils : gris, on ne dit rien.
+
+Les paliers dont Victor n'a pas donné de nouveau CS/min avant 20 min (bronze, silver, gold,
+platinum) gardent **exactement** leur comportement d'avant : l'ancienne cible devient le
+seuil vert et le jaune reprend la valeur que le ratio produisait (7.5 → 6.375, 8.0 → 6.8).
+Vérifié test à l'appui — aucune game ne change de couleur sur ces paliers.
+
+**2. Les morts pondérées — la seule chose qui a demandé une migration.** Règle demandée :
+les morts des 5 dernières minutes d'une partie de **plus de 30 min** ne comptent qu'à
+moitié *pour la couleur*, le compteur affiché restant le rythme brut. Or `deaths10` est un
+total déjà moyenné : savoir **quand** on est mort n'existait nulle part.
+
+L'info vient des events `CHAMPION_KILL` de la **timeline, déjà téléchargée** pour le CS à
+20 min → **zéro appel Riot en plus**. Mais il a fallu deux colonnes,
+`games.deaths` et `games.deaths_last5`, ce qui **contredisait la règle « aucune migration
+pour ce lot »** : signalé à Victor avant de coder, il a tranché pour. On stocke les faits
+bruts et jamais la pondération elle-même — la règle peut changer, l'historique des morts
+non. Ajoutées à `isComplete`, donc les 20 dernières games se réparent toutes seules au
+premier chargement (même mécanique que la Slice 3).
+
+Au-delà de **34 min**, la valeur passe en pointillé avec une infobulle qui explique le
+calcul. Le pointillé exige que les colonnes soient réellement remplies : sinon il
+annoncerait un calcul qui n'a pas eu lieu.
+
+**3. Les bandeaux de gauche** → [lib/banners.ts](lib/banners.ts) +
+[AnalysisPanel](app/_components/AnalysisPanel.tsx), partagés par `/` et `/suivi` (qui passe
+en deux colonnes, `max-w-6xl`). Trois pièges :
+
+- `farmBanner` et `deathsBanner` **existaient déjà** dans `app/page.tsx` avec d'autres
+  textes et sans version verte : réécrits, pas dupliqués ;
+- l'ordre était **rouge → jaune → vert**, l'inverse de ce que Victor voulait. Inversé pour
+  tout le panneau, winrate et nombre de champions compris (confirmé par lui) ;
+- le **jaune sur les morts n'affiche rien** : demande explicite, ce n'est pas un oubli.
+
+**4. La surbrillance clignote.** L'ancien `ring-2 ring-blue-400` fixe devient une keyframe
+`stat-blink` déclarée dans un bloc `@theme` de [globals.css](app/globals.css) (syntaxe
+Tailwind 4). **Piège :** `ring-*` et l'animation utilisent tous les deux `box-shadow` — les
+garder ensemble aurait fait que l'un écrase l'autre. C'est donc l'animation qui dessine le
+liseré, d'où l'absence de `ring-*` dans `highlightClass`. Et `animate-pulse` ne convenait
+pas : il fait varier l'opacité de tout l'élément, donc la valeur chiffrée clignoterait
+aussi. Une règle `prefers-reduced-motion` fige le liseré pour qui a désactivé les
+animations.
+
+**5. Le reste :** durée de partie sur chaque ligne (`mm:ss`), et le CS/min après 20 min
+n'apparaît plus **sous 25 min de partie** (avant : dès 20 min dépassées).
+
+**Refactos au passage, pour ne pas dupliquer le neuf :** les trois cases chiffrées
+deviennent [StatCells](app/_components/StatCells.tsx) (sinon le pointillé et l'infobulle
+existaient en deux exemplaires), et `LoadingDots` sort de `app/page.tsx`.
+
+**Vérifications faites :** `tsc --noEmit` et `npm run build` passent. **60 assertions** sur
+le vrai code exécuté via Node 24 (chaque limite de chaque seuil de chaque palier, la
+fenêtre des 25 min, la pondération, la lecture des `CHAMPION_KILL`, l'ordre et les textes
+des bandeaux) — toutes vertes. La classe `.animate-stat-blink`, sa keyframe et la règle
+`prefers-reduced-motion` sont bien présentes dans le CSS **compilé de production**
+(vérifié dans le fichier, pas seulement dans la source). Layout du cockpit en deux colonnes
+mesuré à 390 / 768 / 1280 px : `scrollWidth == clientWidth` partout, aucun débordement.
+
+**Pas vérifié en vrai :** rien de tout ça n'a été vu dans l'app avec de vraies données —
+la mesure et la capture portent sur une maquette servie avec le CSS compilé.
 
 ### 2026-08-10 (3) — Bandeau du cockpit + changement de profil
 
@@ -248,10 +331,22 @@ trailer `Co-Authored-By`. S'y tenir.
 
 Classé par ce que ça rapporte, pas par difficulté.
 
-### À vérifier en tout premier (hérité du 2026-08-10, jamais testé en vrai)
+### À vérifier en tout premier (rien n'a encore été testé en vrai)
 
-Le code de la session du 2026-08-10 a été poussé sans que Victor ait pu ouvrir l'app.
-**Commencer par lui demander où ça en est, avant d'entamer autre chose.**
+Ni la session du 2026-08-10 ni celle du 2026-08-11 n'ont été ouvertes dans l'app par
+Victor. **Commencer par lui demander où ça en est, avant d'entamer autre chose.**
+
+Du 2026-08-11 :
+
+- [ ] **Les couleurs correspondent aux seuils voulus** sur de vraies games, et le clignotement
+      des stats prioritaires est agréable et pas épileptique (1,4 s par cycle — à ajuster
+      dans [globals.css](app/globals.css) si c'est trop rapide ou trop lent).
+- [ ] **Les bandeaux de gauche apparaissent sur `/suivi`**, dans l'ordre vert → jaune → rouge.
+- [ ] **Les morts en pointillé** sur les games de plus de 34 min, avec l'infobulle au survol.
+      L'infobulle est le `title` natif du navigateur : elle met ~1 s à apparaître. Si Victor
+      la trouve trop discrète, la remplacer par une vraie bulle en CSS.
+
+Du 2026-08-10 :
 
 - [ ] **Le cockpit charge**, n'affiche plus qu'un seul compte Riot (fin du mélange
       cartem/chopin), et le **CS/min après 20 min affiche enfin des valeurs**.
@@ -264,11 +359,13 @@ Le code de la session du 2026-08-10 a été poussé sans que Victor ait pu ouvri
 
 ### Décisions qui n'appartiennent qu'à Victor
 
-- [ ] **Calibrer les cibles `deaths10Target` et `csPerMinTarget`** ([lib/content/mid.ts](lib/content/mid.ts)).
-      10 marqueurs `PLACEHOLDER — à valider par Victor`. Les valeurs actuelles sont
-      inatteignables : le compte challenger mesuré fait **1,74 morts/10 min**, alors que
-      la cible Iron est à 1.5 et la cible Émeraude à 1.0. Un joueur Iron sera rouge sur
-      quasiment toutes ses games.
+- [x] ~~Calibrer les cibles de couleur~~ — **fait le 2026-08-11**, les 10 `PLACEHOLDER` ont
+      disparu au profit de [lib/content/thresholds.ts](lib/content/thresholds.ts).
+      *Réserve à surveiller :* le seuil vert des morts est à **1.0/10 min pour tous les
+      paliers**, alors que le compte challenger mesuré était à **1,74**. Un joueur Iron
+      sera donc rarement vert sur les morts. C'est un choix assumé de Victor (un objectif,
+      pas une moyenne), mais si le cockpit paraît décourageant, c'est la première valeur à
+      revoir.
 - [ ] **Le mapping niveau de pyramide ↔ rang** ([lib/content/pyramid.ts:22](lib/content/pyramid.ts#L22)).
       `TIER_PYRAMID_LEVELS` est un premier jet déduit des `focusPoints`, marqué
       `TODO Victor`. C'est ce qui pilote la pyramide de l'onboarding.
@@ -276,9 +373,10 @@ Le code de la session du 2026-08-10 a été poussé sans que Victor ait pu ouvri
 ### Contenu (le gros morceau)
 
 - [ ] **4 rôles sur 5 n'ont aucun contenu** : top, jungle, adc, support tombent sur le
-      fallback ([lib/content/mid.ts:167](lib/content/mid.ts#L167)). Le squelette est prêt —
+      fallback ([lib/content/mid.ts](lib/content/mid.ts)). Le squelette est prêt —
       il suffit d'un `Partial<Record<Tier, TierContent>>` par rôle. C'est de la rédaction,
-      pas du code.
+      pas du code. Moins urgent depuis le 2026-08-11 : ces rôles ont désormais des
+      couleurs, il ne leur manque que le texte et la surbrillance.
 - [ ] **4 paliers mid manquants** : diamond, master, grandmaster, challenger.
 
 ### Code
@@ -320,8 +418,15 @@ Les décisions qu'il ne faut pas défaire sans raison — elles ont chacune coû
   `/` et `/suivi` passent tous les deux par elle. Ne jamais recalculer un CS/min ailleurs —
   c'est ce qui fait qu'un fix profite aux deux pages d'un coup (vérifié ce 2026-08-10).
 - **Les couleurs sont relatives au palier, jamais absolues.** 132 CS à 20 min, c'est bon
-  en Iron et faible en Émeraude. Corollaire : **cible inconnue → on ne dit rien**
-  (`unknown`, gris) plutôt que de dire faux. Vaut aussi pour les bannières d'analyse.
+  en Iron et faible en Émeraude. Corollaire : **seuils inconnus → on ne dit rien**
+  (`unknown`, gris) plutôt que de dire faux. Vaut aussi pour les bandeaux d'analyse.
+  Les seuils vivent tous dans [lib/content/thresholds.ts](lib/content/thresholds.ts) et
+  dépendent du **palier seul** ; `lib/stats.ts` ne décide que du sens de comparaison
+  (plus grand = mieux pour le farm, plus petit = mieux pour les morts).
+- **Le compteur affiché et le compteur qui donne la couleur peuvent différer.** Les morts
+  en sont le cas : on montre le rythme brut, on colore sur le rythme pondéré. Quand les
+  deux divergent, l'écart doit être **visible et explicable** à l'utilisateur (d'où le
+  pointillé + l'infobulle), jamais silencieux.
 - **Migrations non destructives uniquement.** On ajoute des colonnes, on n'en supprime
   jamais. Le SQL se colle à la main dans l'éditeur Supabase.
 - **La clé Riot ne quitte jamais le serveur**, et la région est EUW en dur.

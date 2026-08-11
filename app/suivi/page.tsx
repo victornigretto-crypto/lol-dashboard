@@ -3,24 +3,21 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import {
-  csMetrics,
-  csPerMinClass,
-  deaths10Class,
-  highlightClass,
-  targetsOf,
-  type Targets,
-} from "@/lib/stats";
+import { performanceBanners } from "@/lib/banners";
 import {
   FALLBACK_CONTENT,
   getContent,
   roleFromLane,
+  thresholdsOf,
   tierFromRiotTier,
   type TierContent,
+  type TierThresholds,
 } from "@/lib/content";
 import { championIconUrl, useDdragonVersion } from "@/lib/ddragon";
 import { rankEmblemUrl, rankLabel } from "@/lib/riot/rank";
-import { formatGameDate, parseRiotId } from "@/lib/riot/transform";
+import { formatDuration, formatGameDate, parseRiotId } from "@/lib/riot/transform";
+import { AnalysisPanel } from "../_components/AnalysisPanel";
+import { StatCells } from "../_components/StatCells";
 
 // Les champs venant de l'import Riot sont en lecture seule ici : seuls les
 // trois listes d'erreurs et le résumé sont saisis par le joueur (Slice 4).
@@ -36,6 +33,8 @@ type Game = {
   deaths10: number;
   cs_final: number | null;
   game_duration_seconds: number | null;
+  deaths: number | null;
+  deaths_last5: number | null;
   errorLane: string[];
   errorMacro: string[];
   errorFight: string[];
@@ -89,6 +88,9 @@ export default function SuiviPage() {
   const [riotId, setRiotId] = useState<string | null>(null);
   const [primaryRole, setPrimaryRole] = useState<string | null>(null);
   const [content, setContent] = useState<TierContent>(FALLBACK_CONTENT);
+  // Séparé de `content` : les seuils de couleur ne dépendent que du palier,
+  // alors que le contenu pédagogique dépend du couple (rôle, palier).
+  const [thresholds, setThresholds] = useState<TierThresholds | null>(null);
 
   // Changement de compte Riot. `reloadKey` relance l'effet de chargement au
   // lieu de dupliquer sa logique : il garde ainsi son propre garde-fou
@@ -147,10 +149,12 @@ export default function SuiviPage() {
 
       // Le palier de référence est le rang SoloQ courant ; à défaut (non
       // classé), l'ancien rang saisi à l'onboarding.
+      const tier = tierFromRiotTier(currentRank?.tier ?? profile?.former_rank);
       const role = roleFromLane(profile?.primary_role);
-      if (role) {
-        setContent(getContent(role, tierFromRiotTier(currentRank?.tier ?? profile?.former_rank)));
-      }
+      if (role) setContent(getContent(role, tier));
+      // Les couleurs, elles, s'appliquent dès que le palier est connu — même
+      // pour un rôle dont le contenu pédagogique n'est pas encore écrit.
+      setThresholds(thresholdsOf(tier));
 
       // Le cockpit ne montre QUE les games du compte Riot actuellement lié.
       // `user_id` seul ne suffit pas : relier un autre Riot ID écrase
@@ -268,6 +272,7 @@ export default function SuiviPage() {
       setGames([]);
       setRank(null);
       setContent(FALLBACK_CONTENT);
+      setThresholds(null);
       setSwitchOpen(false);
       setSwitchInput("");
       setLoading(true);
@@ -279,12 +284,15 @@ export default function SuiviPage() {
     }
   };
 
-  const targets: Targets = targetsOf(content);
   const parsedRiotId = riotId ? parseRiotId(riotId) : null;
+  // Mêmes bandeaux que sur l'analyse gratuite, calculés sur les games du
+  // cockpit. Ils apparaissent donc en même temps que le tableau, une fois
+  // l'import terminé.
+  const banners = performanceBanners(games, thresholds);
 
   return (
     <main className="min-h-screen bg-slate-950 p-4 text-slate-100">
-      <section className="mx-auto max-w-5xl">
+      <section className="mx-auto max-w-6xl">
         <header className="mb-6">
           {/* Hors du cadre : ce qui concerne le COMPTE GG DASHBOARD (email,
               déconnexion) et le choix du compte Riot analysé. Le cadre, lui, ne
@@ -413,27 +421,34 @@ export default function SuiviPage() {
           </div>
         )}
 
-        {loading ? (
-          <p className="text-slate-400">Chargement...</p>
-        ) : games.length === 0 ? (
-          <p className="rounded-2xl border border-slate-700 bg-slate-900/60 p-6 text-center text-slate-400">
-            Aucune game pour l&apos;instant. Joue une SoloQ : elle apparaîtra ici automatiquement.
-          </p>
-        ) : (
-          <div className="flex flex-col gap-4">
-            {games.map((game) => (
-              <GameCard
-                key={game.id}
-                game={game}
-                targets={targets}
-                content={content}
-                ddragonVersion={ddragonVersion}
-                onErrorChange={updateErrorList}
-                onSummaryChange={updateSummary}
-              />
-            ))}
-          </div>
-        )}
+        {/* Même disposition que l'analyse gratuite : les bandeaux à gauche,
+            l'historique à droite. Sur mobile la colonne de gauche passe
+            au-dessus. */}
+        <div className="grid grid-cols-1 gap-6 md:grid-cols-[300px_1fr]">
+          <AnalysisPanel banners={banners} loading={loading} />
+
+          {loading ? (
+            <p className="text-slate-400">Chargement...</p>
+          ) : games.length === 0 ? (
+            <p className="rounded-2xl border border-slate-700 bg-slate-900/60 p-6 text-center text-slate-400">
+              Aucune game pour l&apos;instant. Joue une SoloQ : elle apparaîtra ici automatiquement.
+            </p>
+          ) : (
+            <div className="flex min-w-0 flex-col gap-4">
+              {games.map((game) => (
+                <GameCard
+                  key={game.id}
+                  game={game}
+                  thresholds={thresholds}
+                  content={content}
+                  ddragonVersion={ddragonVersion}
+                  onErrorChange={updateErrorList}
+                  onSummaryChange={updateSummary}
+                />
+              ))}
+            </div>
+          )}
+        </div>
       </section>
     </main>
   );
@@ -441,14 +456,14 @@ export default function SuiviPage() {
 
 function GameCard({
   game,
-  targets,
+  thresholds,
   content,
   ddragonVersion,
   onErrorChange,
   onSummaryChange,
 }: {
   game: Game;
-  targets: Targets;
+  thresholds: TierThresholds | null;
   content: TierContent;
   ddragonVersion: string | null;
   onErrorChange: (id: string, field: ErrorField, value: string, index: number) => void;
@@ -457,7 +472,6 @@ function GameCard({
   const win = game.result.toLowerCase().startsWith("v");
   const icon = championIconUrl(ddragonVersion, game.champion);
   const opponentIcon = championIconUrl(ddragonVersion, game.matchup);
-  const { perMinPre20, perMinPost20 } = csMetrics(game);
 
   return (
     <article
@@ -499,7 +513,9 @@ function GameCard({
             {game.matchup && <span className="text-slate-500"> vs {game.matchup}</span>}
           </p>
           <p className="text-xs text-slate-400">
-            {[formatGameDate(game.played_at), game.lane, game.queue].filter(Boolean).join(" · ")}
+            {[formatGameDate(game.played_at), game.lane, game.queue, formatDuration(game.game_duration_seconds)]
+              .filter(Boolean)
+              .join(" · ")}
           </p>
         </div>
 
@@ -507,36 +523,7 @@ function GameCard({
           {win ? "Victoire" : "Défaite"}
         </p>
 
-        <div
-          className={
-            "w-20 rounded px-1 py-0.5 text-center text-sm " +
-            csPerMinClass(perMinPre20, targets.csPerMin) +
-            highlightClass(content, "csPre20")
-          }
-        >
-          <p className="text-[10px] leading-tight opacity-80">CS/min à 20min</p>
-          <p>{perMinPre20 ?? "—"}</p>
-        </div>
-        <div
-          className={
-            "w-20 rounded px-1 py-0.5 text-center text-sm " +
-            csPerMinClass(perMinPost20, targets.csPerMin) +
-            highlightClass(content, "csPost20")
-          }
-        >
-          <p className="text-[10px] leading-tight opacity-80">CS/min après 20min</p>
-          <p>{perMinPost20 ?? "—"}</p>
-        </div>
-        <div
-          className={
-            "w-20 rounded px-1 py-0.5 text-center text-sm " +
-            deaths10Class(game.deaths10, targets.deaths10) +
-            highlightClass(content, "deaths10")
-          }
-        >
-          <p className="text-[10px] leading-tight opacity-80">Morts/10m</p>
-          <p>{game.deaths10}</p>
-        </div>
+        <StatCells game={game} thresholds={thresholds} content={content} />
       </div>
 
       <div className="mt-4 grid gap-4 md:grid-cols-3">

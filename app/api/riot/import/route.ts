@@ -10,6 +10,7 @@ import {
 } from "@/lib/riot/client";
 import {
   csAtMinute,
+  deathsInLastMinutes,
   deathsPer10Min,
   findOpponent,
   isAllowedQueue,
@@ -24,6 +25,12 @@ const TARGET_COUNT = 20;
 const PAGE_SIZE = 20;
 const MAX_SCAN = 60; // borne de sécurité pour le filtre "all" (évite de scanner à l'infini un joueur qui ne fait que de l'ARAM)
 const CONCURRENCY = 15; // appels Riot en parallèle, reste sous la limite de la dev key (20 req/s)
+
+// Fenêtre de fin de partie dont les morts sont pondérées à l'affichage
+// (cf. lib/stats). On stocke le FAIT BRUT — combien de morts dans les 5
+// dernières minutes — et pas le résultat de la pondération : la règle de
+// pondération peut changer, l'historique des morts, non.
+const LATE_DEATHS_WINDOW_MIN = 5;
 
 type Filter = "soloq" | "ranked" | "all";
 
@@ -42,6 +49,11 @@ type Row = {
   // `isComplete`. Toute Row rendue ici les a donc réellement.
   cs_final: number | null;
   game_duration_seconds: number | null;
+  // Faits bruts derrière la couleur des morts : le total, et combien sont
+  // survenues dans les 5 dernières minutes. `deaths10` reste le rythme
+  // affiché ; la pondération se fait à la lecture (lib/stats).
+  deaths: number | null;
+  deaths_last5: number | null;
 };
 
 type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
@@ -58,7 +70,9 @@ function isComplete(row: Partial<Row> & { puuid?: string | null }): boolean {
       row.played_at &&
       row.puuid &&
       row.cs_final !== null &&
-      row.game_duration_seconds !== null
+      row.game_duration_seconds !== null &&
+      row.deaths !== null &&
+      row.deaths_last5 !== null
   );
 }
 
@@ -87,7 +101,9 @@ async function buildRowsForMatchIds(
     // la ligne d'un autre compte donnerait les stats d'un autre joueur.
     const { data: cached } = await supabase
       .from("games")
-      .select("riot_match_id, lane, champion, matchup, result, cs20, deaths10, queue, played_at, cs_final, game_duration_seconds, puuid")
+      .select(
+        "riot_match_id, lane, champion, matchup, result, cs20, deaths10, queue, played_at, cs_final, game_duration_seconds, deaths, deaths_last5, puuid"
+      )
       .eq("user_id", userId)
       .eq("puuid", puuid)
       .in("riot_match_id", matchIds);
@@ -123,6 +139,13 @@ async function buildRowsForMatchIds(
       played_at: new Date(match.info.gameCreation).toISOString(),
       cs_final: totalCs(participant),
       game_duration_seconds: match.info.gameDuration,
+      deaths: participant.deaths,
+      deaths_last5: deathsInLastMinutes(
+        timeline,
+        participant.participantId,
+        match.info.gameDuration,
+        LATE_DEATHS_WINDOW_MIN
+      ),
     };
   });
 

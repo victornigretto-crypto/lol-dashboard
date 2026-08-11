@@ -22,6 +22,8 @@ export interface TierContent {
   highlightStats: StatKey[];
   bucketThemes: { lane?: string; fight?: string; macro?: string };
   fieldQuestions: { lane: string; fight: string; macro: string };
-  csPerMinTarget: number | null; // cible "bon" CS/min, sert à la couleur (Slice 3)
-  deaths10Target: number | null; // cible "bon" morts/10, sert à la couleur (Slice 3)
 }
+
+// Les cibles chiffrées ne vivent plus ici : elles sont dans
+// `lib/content/thresholds.ts`, indexées par palier et non par (rôle, palier),
+// avec des seuils distincts avant / après 20 min.

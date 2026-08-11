@@ -1,10 +1,11 @@
 // Chemin de lecture partagé entre / (analyse publique) et /suivi (cockpit) :
-// dérivation du CS/min à partir des faits bruts stockés, et codes couleur.
+// dérivation du CS/min et du rythme de morts à partir des faits bruts
+// stockés, et codes couleur.
 //
-// Les couleurs sont RELATIVES à la cible du palier (lib/content), jamais à une
+// Les couleurs sont RELATIVES au palier (lib/content/thresholds), jamais à une
 // échelle absolue : 132 CS à 20 min, c'est bon en Iron et faible en Émeraude.
 import { csPerMin } from "@/lib/riot/transform";
-import type { StatKey, TierContent } from "@/lib/content";
+import type { StatKey, StatThreshold, TierContent } from "@/lib/content";
 
 // Champs bruts tels que stockés en base / renvoyés par /api/riot/import.
 // Aucune colonne dérivée : tout ce qui suit est calculé à la lecture.
@@ -21,12 +22,17 @@ export type CsMetrics = {
 
 const PRE20_WINDOW_MIN = 20;
 
+// En dessous de 25 min, le "après 20 min" reposerait sur quelques minutes de
+// jeu à peine : trop peu pour juger un side lane. On n'affiche alors rien
+// plutôt qu'une valeur qui varierait du simple au double sur deux vagues.
+const POST20_MIN_DURATION_MIN = 25;
+
 // Riot renvoie `gameDuration` en secondes, mais quelques vieux matchs le
 // donnent en millisecondes. Une partie de plus de ~2h47 étant impossible,
 // au-delà de ce seuil la valeur est forcément en ms.
 const MS_THRESHOLD_SECONDS = 10000;
 
-function durationMinutes(rawDuration: number | null): number | null {
+export function durationMinutes(rawDuration: number | null): number | null {
   if (rawDuration == null || rawDuration <= 0) return null;
   const seconds = rawDuration > MS_THRESHOLD_SECONDS ? rawDuration / 1000 : rawDuration;
   return seconds / 60;
@@ -46,9 +52,8 @@ export function csMetrics(game: CsSource): CsMetrics {
     minutes !== null && minutes < PRE20_WINDOW_MIN ? minutes : PRE20_WINDOW_MIN;
   const perMinPre20 = cs20 === null ? null : csPerMin(cs20, pre20Minutes);
 
-  // Le post-20 n'existe que si la game a dépassé 20 min et qu'on connaît le
-  // CS de fin : sinon la valeur reste inconnue, jamais approximée à 0.
-  const hasPost20 = cs20 !== null && cs_final !== null && minutes !== null && minutes > PRE20_WINDOW_MIN;
+  const hasPost20 =
+    cs20 !== null && cs_final !== null && minutes !== null && minutes >= POST20_MIN_DURATION_MIN;
 
   return {
     perMinPre20,
@@ -56,44 +61,103 @@ export function csMetrics(game: CsSource): CsMetrics {
   };
 }
 
-// Moyenne d'un CS/min sur un échantillon, en ignorant les games où la valeur
-// n'est pas calculable (post-20 d'une game qui s'arrête avant 20 min, games
-// importées avant que cs_final soit stocké...).
+// --- Morts ---------------------------------------------------------------
+
+// `deaths10` est le rythme AFFICHÉ, tel que calculé à l'import : morts totales
+// ramenées à 10 minutes. `deaths` et `deaths_last5` sont les faits bruts qui
+// permettent d'en dériver le rythme PONDÉRÉ, celui qui donne la couleur.
+// Les deux dernières sont nulles pour les games importées avant leur colonne.
+export type DeathsSource = {
+  deaths10: number;
+  deaths: number | null;
+  deaths_last5: number | null;
+  game_duration_seconds: number | null;
+};
+
+// Au-delà de 30 min, une mort dans les 5 dernières minutes ne compte qu'à
+// moitié : à ce stade la partie se joue en fights groupés, mourir y est
+// souvent le prix d'un objectif, pas une faute de lane.
+//
+// La FENÊTRE (5 min) n'est pas ici : elle est appliquée à l'import, qui
+// remplit `deaths_last5` (cf. LATE_DEATHS_WINDOW_MIN dans la route d'import).
+// Ce module ne décide que du POIDS et du seuil de durée.
+const LATE_GAME_MIN = 30;
+const LATE_WEIGHT = 0.5;
+
+// Au-delà de cette durée, l'écart entre le chiffre affiché et le chiffre qui
+// donne la couleur devient assez visible pour mériter une explication : la
+// valeur passe en pointillé avec une infobulle.
+const DEATHS_EXPLAIN_MIN = 34;
+
+// Rythme de morts servant à la COULEUR. Le chiffre affiché, lui, reste
+// `game.deaths10` : on ne change pas le compteur, seulement le jugement.
+// Sans les faits bruts (game importée avant les colonnes `deaths`), on
+// retombe sur le rythme brut — même comportement qu'avant, zéro régression.
+export function weightedDeaths10(game: DeathsSource): number {
+  const minutes = durationMinutes(game.game_duration_seconds);
+  if (
+    minutes === null ||
+    minutes <= LATE_GAME_MIN ||
+    game.deaths == null ||
+    game.deaths_last5 == null
+  ) {
+    return game.deaths10;
+  }
+  const adjusted = game.deaths - LATE_WEIGHT * game.deaths_last5;
+  return Math.round((adjusted * 10) / minutes * 10) / 10;
+}
+
+// Vrai quand la pondération a réellement été appliquée ET que la partie est
+// assez longue pour que l'écart se voie : c'est la condition du pointillé.
+// On exige les faits bruts, sinon le pointillé annoncerait un calcul qui n'a
+// pas eu lieu.
+export function explainsDeaths(game: DeathsSource): boolean {
+  const minutes = durationMinutes(game.game_duration_seconds);
+  return (
+    minutes !== null &&
+    minutes > DEATHS_EXPLAIN_MIN &&
+    game.deaths != null &&
+    game.deaths_last5 != null
+  );
+}
+
+export const DEATHS_EXPLANATION =
+  "Le chiffre affiché compte toutes tes morts. La couleur, elle, ne compte " +
+  "qu'à moitié les morts des 5 dernières minutes : sur une partie de plus de " +
+  "30 minutes, mourir en fight d'objectif n'est pas la même faute que mourir en lane.";
+
+// --- Moyennes ------------------------------------------------------------
+
+// Moyenne d'une stat sur un échantillon, en ignorant les games où la valeur
+// n'est pas calculable (post-20 d'une game trop courte, games importées avant
+// que cs_final soit stocké...).
 export function averageCsPerMin(values: (number | null)[]): number | null {
   const known = values.filter((v): v is number => v !== null);
   if (known.length === 0) return null;
   return Math.round((known.reduce((sum, v) => sum + v, 0) / known.length) * 10) / 10;
 }
 
-// Jugement d'une valeur face à la cible de son palier. "unknown" = valeur ou
-// cible inconnue : on ne dit rien plutôt que de dire faux. Les couleurs ET
-// les bannières d'analyse dérivent toutes de ces deux fonctions : un seul
-// endroit fixe les seuils.
+// --- Couleurs ------------------------------------------------------------
+
+// Jugement d'une valeur face aux seuils de son palier. "unknown" = valeur ou
+// seuils inconnus : on ne dit rien plutôt que de dire faux. Les couleurs ET
+// les bandeaux d'analyse dérivent tous de ces deux fonctions : un seul
+// endroit fixe les règles de comparaison.
 export type Band = "good" | "warn" | "bad" | "unknown";
 
 // Farm : plus grand = mieux.
-//   >= cible          -> good
-//   >= 85 % de cible  -> warn
-//   sinon             -> bad
-const CS_WARN_RATIO = 0.85;
-
-export function csPerMinBand(value: number | null, target: number | null): Band {
-  if (value === null || target === null || target <= 0) return "unknown";
-  if (value >= target) return "good";
-  if (value >= target * CS_WARN_RATIO) return "warn";
+export function csBand(value: number | null, threshold: StatThreshold | null): Band {
+  if (value === null || threshold === null) return "unknown";
+  if (value >= threshold.green) return "good";
+  if (value >= threshold.yellow) return "warn";
   return "bad";
 }
 
 // Morts : logique inversée, plus petit = mieux.
-//   <= cible           -> good
-//   <= 115 % de cible  -> warn
-//   sinon              -> bad
-const DEATHS_WARN_RATIO = 1.15;
-
-export function deaths10Band(value: number | null, target: number | null): Band {
-  if (value === null || target === null || target <= 0) return "unknown";
-  if (value <= target) return "good";
-  if (value <= target * DEATHS_WARN_RATIO) return "warn";
+export function deathsBand(value: number | null, threshold: StatThreshold | null): Band {
+  if (value === null || threshold === null) return "unknown";
+  if (value <= threshold.green) return "good";
+  if (value <= threshold.yellow) return "warn";
   return "bad";
 }
 
@@ -104,31 +168,25 @@ const BAND_CLASS: Record<Band, string> = {
   unknown: "bg-slate-800 text-slate-300",
 };
 
-function bandClass(band: Band): string {
+export function bandClass(band: Band): string {
   return BAND_CLASS[band];
 }
 
-export function csPerMinClass(value: number | null, target: number | null): string {
-  return bandClass(csPerMinBand(value, target));
+export function csClass(value: number | null, threshold: StatThreshold | null): string {
+  return bandClass(csBand(value, threshold));
 }
 
-export function deaths10Class(value: number | null, target: number | null): string {
-  return bandClass(deaths10Band(value, target));
+export function deathsClass(value: number | null, threshold: StatThreshold | null): string {
+  return bandClass(deathsBand(value, threshold));
 }
 
-// Cibles de performance du palier, extraites du contenu. `null` = palier ou
-// rôle sans contenu écrit : ni couleur, ni jugement.
-export type Targets = { csPerMin: number | null; deaths10: number | null };
-
-export function targetsOf(content: TierContent): Targets {
-  return { csPerMin: content.csPerMinTarget, deaths10: content.deaths10Target };
-}
-
-// Une stat mise en avant par le contenu du palier reçoit un liseré : c'est
-// celle sur laquelle ce palier doit se concentrer en priorité. Concaténé à
-// une classe de couleur, d'où l'espace initial.
-const HIGHLIGHT_RING = " ring-2 ring-blue-400";
+// Une stat mise en avant par le contenu du palier clignote : c'est celle sur
+// laquelle ce palier doit se concentrer en priorité. L'animation est définie
+// dans app/globals.css (elle dessine le liseré elle-même, d'où l'absence de
+// `ring-*` ici : les deux se disputeraient la même propriété box-shadow).
+// Concaténé à une classe de couleur, d'où l'espace initial.
+const HIGHLIGHT_CLASS = " animate-stat-blink";
 
 export function highlightClass(content: TierContent, stat: StatKey): string {
-  return content.highlightStats.includes(stat) ? HIGHLIGHT_RING : "";
+  return content.highlightStats.includes(stat) ? HIGHLIGHT_CLASS : "";
 }
