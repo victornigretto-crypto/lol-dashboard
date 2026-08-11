@@ -23,6 +23,11 @@ export type TierThresholds = {
   csPre20: StatThreshold;
   csPost20: StatThreshold;
   deaths10: StatThreshold;
+  // Nombre de champions TOLÉRÉ sur un même rôle, au-delà duquel le bandeau
+  // "trop de champion" passe au rouge. C'est un maximum inclusif : la
+  // comparaison est stricte (3 champions en iron = rien, 4 = rouge).
+  // Pas de seuil vert ni jaune ici — la demande ne prévoit que l'alerte.
+  maxChampions: number;
 };
 
 // Les paliers dont le CS/min avant 20 min n'a pas été recalibré gardent
@@ -38,6 +43,7 @@ const EMERALD: TierThresholds = {
   csPre20: { green: 8.3, yellow: 7.0 },
   csPost20: { green: 7.5, yellow: 6.0 },
   deaths10: { green: 1.0, yellow: 1.51 },
+  maxChampions: 5,
 };
 
 export const TIER_THRESHOLDS: Partial<Record<Tier, TierThresholds>> = {
@@ -45,26 +51,31 @@ export const TIER_THRESHOLDS: Partial<Record<Tier, TierThresholds>> = {
     csPre20: { green: 7.0, yellow: 5.5 },
     csPost20: { green: 6.0, yellow: 5.0 },
     deaths10: { green: 1.0, yellow: 2.0 },
+    maxChampions: 3,
   },
   bronze: {
     csPre20: CS_PRE20_UNCHANGED_75,
     csPost20: { green: 6.0, yellow: 5.0 },
     deaths10: { green: 1.0, yellow: 2.0 },
+    maxChampions: 3,
   },
   silver: {
     csPre20: CS_PRE20_UNCHANGED_75,
     csPost20: { green: 6.5, yellow: 5.0 },
     deaths10: { green: 1.0, yellow: 1.75 },
+    maxChampions: 4,
   },
   gold: {
     csPre20: CS_PRE20_UNCHANGED_80,
     csPost20: { green: 7.0, yellow: 5.5 },
     deaths10: { green: 1.0, yellow: 1.51 },
+    maxChampions: 4,
   },
   platinum: {
     csPre20: CS_PRE20_UNCHANGED_80,
     csPost20: { green: 7.5, yellow: 6.0 },
     deaths10: { green: 1.0, yellow: 1.51 },
+    maxChampions: 5,
   },
   emerald: EMERALD,
   diamond: EMERALD,

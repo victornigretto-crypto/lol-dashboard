@@ -109,17 +109,11 @@ function winrateBanner(games: RiotGame[]): Banner | null {
   return { id: "winrate", severity: "green", text: "Tu es en train de smurf !", detail };
 }
 
-function championDiversityBanner(games: RiotGame[]): Banner | null {
-  const distinct = new Set(games.map((g) => g.champion)).size;
-  const detail = `${distinct} champions différents sur tes ${games.length} dernières classées`;
-  if (distinct >= 5) return { id: "champions", severity: "red", text: "Trop de champion", detail };
-  if (distinct >= 4) return { id: "champions", severity: "yellow", text: "Un peu trop de champions", detail };
-  return null;
-}
-
-// Les bandeaux de farm et de morts vivent dans lib/banners : ils sont
-// partagés avec /suivi et se jugent sur les mêmes seuils de palier que les
-// couleurs du tableau.
+// Les bandeaux de farm, de morts, de rôles et de pool de champions vivent dans
+// lib/banners : ils sont partagés avec /suivi et se jugent sur les mêmes seuils
+// de palier que les couleurs du tableau. L'ancien `championDiversityBanner`
+// local (5 champions tous rôles confondus, sans palier) y a été absorbé par
+// `championPoolBanner`, qui compte par rôle et par palier.
 
 function isTilted(games: RiotGame[]): boolean {
   return games.some((g) => g.queue === "SoloQ" && FARM_LANES.has(g.lane) && g.deaths10 >= 4);
@@ -322,10 +316,7 @@ export default function Home() {
 
     const rankedTask = fetchGames(riotId, "ranked").then((data) => {
       const recent = filterRecent(data.games);
-      const extra = [
-        ...performanceBanners(recent, thresholds),
-        ...[championDiversityBanner(recent)].filter((b): b is Banner => b !== null),
-      ];
+      const extra = performanceBanners(recent, thresholds);
       if (extra.length > 0) setBanners((prev) => sortBanners([...prev, ...extra]));
       setTiltAlert(isTilted(recent));
     }, onFail);

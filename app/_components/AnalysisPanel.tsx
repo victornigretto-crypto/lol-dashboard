@@ -51,7 +51,10 @@ export function AnalysisPanel({
                 }
               >
                 <div className="flex items-center justify-between gap-2">
-                  <span>{b.text}</span>
+                  {/* `whitespace-pre-line` : certains libellés tiennent sur
+                      deux lignes (le pool de champions), les autres n'en
+                      contiennent pas et ne bougent donc pas. */}
+                  <span className="whitespace-pre-line">{b.text}</span>
                   <span className={"text-xs transition-transform " + (open ? "rotate-180" : "")}>▾</span>
                 </div>
                 {open && <p className="mt-1 text-xs font-normal opacity-90">{b.detail}</p>}

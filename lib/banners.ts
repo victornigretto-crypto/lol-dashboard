@@ -16,7 +16,7 @@ import {
   type CsSource,
   type DeathsSource,
 } from "@/lib/stats";
-import type { TierThresholds } from "@/lib/content";
+import { roleFromLane, type Role, type TierThresholds } from "@/lib/content";
 
 export type Severity = "green" | "yellow" | "red";
 
@@ -48,12 +48,33 @@ const BAND_TO_SEVERITY: Record<Exclude<Band, "unknown">, Severity> = {
 };
 
 // Une game telle qu'attendue par ces bandeaux : le sous-ensemble commun aux
-// deux pages (RiotGame côté /, Game côté /suivi).
-export type BannerGame = CsSource & DeathsSource & { lane: string };
+// deux pages (RiotGame côté /, Game côté /suivi). `queue` est nullable parce
+// que /suivi le lit en base, où d'anciennes lignes peuvent l'avoir vide.
+export type BannerGame = CsSource &
+  DeathsSource & { lane: string; champion: string; queue: string | null };
 
 function farmGames(games: BannerGame[]): BannerGame[] {
   return games.filter((g) => FARM_LANES.has(g.lane));
 }
+
+// Les bandeaux "rôles" et "champions" se jugent sur la SoloQ seule : c'est la
+// file où la spécialisation compte, et c'est la demande explicite. Les autres
+// bandeaux, eux, restent calculés sur tout l'échantillon affiché.
+function soloqGames(games: BannerGame[]): BannerGame[] {
+  return games.filter((g) => g.queue === "SoloQ");
+}
+
+const ROLE_LABEL: Record<Role, string> = {
+  top: "Top",
+  jungle: "Jungle",
+  mid: "Mid",
+  adc: "Adc",
+  support: "Support",
+};
+
+// Ordre du plus haut au plus bas de la carte, pour que le détail se lise
+// toujours pareil quel que soit l'ordre des games.
+const ROLE_ORDER: Role[] = ["top", "jungle", "mid", "adc", "support"];
 
 function plural(count: number): string {
   return count > 1 ? "s" : "";
@@ -124,12 +145,75 @@ export function deathsBanner(games: BannerGame[], thresholds: TierThresholds | n
   };
 }
 
-// Les trois bandeaux de performance, dans l'ordre d'affichage. Les pages y
-// ajoutent leurs bandeaux propres (winrate, nombre de champions...).
+// Un joueur qui touche à 4 rôles ou plus ne construit d'automatismes nulle
+// part. Seul bandeau du lot à ne PAS dépendre du palier : la règle est la même
+// pour tout le monde, donc il s'affiche aussi pour un compte non classé.
+export function rolesBanner(games: BannerGame[]): Banner | null {
+  const sample = soloqGames(games);
+  const played = new Set(
+    sample.map((g) => roleFromLane(g.lane)).filter((r): r is Role => r !== null)
+  );
+  if (played.size < 4) return null;
+
+  const named = ROLE_ORDER.filter((r) => played.has(r)).map((r) => ROLE_LABEL[r]);
+  return {
+    id: "roles",
+    severity: "red",
+    text: "Tu joues trop de rôle !!!",
+    detail: `${played.size} rôles différents sur tes ${sample.length} dernières SoloQ (${named.join(", ")})`,
+  };
+}
+
+// Le pool de champions se compte PAR RÔLE, pas sur l'ensemble des games : un
+// joueur avec 3 champions en mid et 3 en top reste concentré sur chacun de ses
+// rôles — c'est le bandeau "rôles" ci-dessus qui doit lui parler, pas celui-ci.
+// Le rôle retenu pour le détail est le plus chargé, celui qui a déclenché.
+export function championPoolBanner(
+  games: BannerGame[],
+  thresholds: TierThresholds | null
+): Banner | null {
+  if (thresholds === null) return null;
+  const sample = soloqGames(games);
+  const max = thresholds.maxChampions;
+
+  const pools = new Map<Role, Set<string>>();
+  for (const game of sample) {
+    const role = roleFromLane(game.lane);
+    if (role === null) continue;
+    const pool = pools.get(role) ?? new Set<string>();
+    pool.add(game.champion);
+    pools.set(role, pool);
+  }
+
+  let worst: { role: Role; count: number } | null = null;
+  for (const role of ROLE_ORDER) {
+    const count = pools.get(role)?.size ?? 0;
+    // Comparaison stricte : le seuil est un nombre toléré, pas un plafond
+    // interdit (3 champions en iron ne dit rien, 4 déclenche).
+    if (count > max && (worst === null || count > worst.count)) worst = { role, count };
+  }
+  if (worst === null) return null;
+
+  return {
+    id: "champion-pool",
+    // Le texte est un conseil constant ("3 max"), volontairement indépendant du
+    // seuil qui a déclenché : le seuil du palier, lui, est dans le détail.
+    severity: "red",
+    text: "Tu joues trop de champion !\nConcentre toi sur 1-2 champions, 3 max pour progresser",
+    detail: `${worst.count} champions différents en ${ROLE_LABEL[worst.role]} sur tes ${sample.length} dernières SoloQ — ton palier en tolère ${max} par rôle`,
+  };
+}
+
+// Les bandeaux partagés par / et /suivi, dans l'ordre d'affichage. Les pages y
+// ajoutent leurs bandeaux propres (winrate côté /).
 export function performanceBanners(games: BannerGame[], thresholds: TierThresholds | null): Banner[] {
   return sortBanners(
-    [farmPre20Banner(games, thresholds), farmPost20Banner(games, thresholds), deathsBanner(games, thresholds)].filter(
-      (b): b is Banner => b !== null
-    )
+    [
+      farmPre20Banner(games, thresholds),
+      farmPost20Banner(games, thresholds),
+      deathsBanner(games, thresholds),
+      rolesBanner(games),
+      championPoolBanner(games, thresholds),
+    ].filter((b): b is Banner => b !== null)
   );
 }
