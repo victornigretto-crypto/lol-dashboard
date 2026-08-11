@@ -146,6 +146,17 @@ mesuré à 390 / 768 / 1280 px : `scrollWidth == clientWidth` partout, aucun dé
 **Pas vérifié en vrai :** rien de tout ça n'a été vu dans l'app avec de vraies données —
 la mesure et la capture portent sur une maquette servie avec le CSS compilé.
 
+**Clôture.** Un seul commit, `0ac3828`, poussé sur `origin/master`. Victor avait lancé la
+migration `deaths` / `deaths_last5` avant qu'on code. **Troisième session d'affilée sans
+test réel dans l'app** : la liste « À vérifier en tout premier » s'allonge au lieu de se
+vider. Au prochain démarrage, insister pour qu'il ouvre le cockpit **avant** d'ajouter
+quoi que ce soit.
+
+**Attention au premier chargement de `/suivi` :** il sera plus lent (~5 s). `isComplete`
+exige désormais `deaths` et `deaths_last5`, donc les 20 games sont retéléchargées une fois
+pour aller chercher les horaires de morts, puis réparées en base. C'est le comportement
+attendu, pas un bug.
+
 ### 2026-08-10 (3) — Bandeau du cockpit + changement de profil
 
 Refonte du `<header>` de [app/suivi/page.tsx](app/suivi/page.tsx), à la demande de Victor :
