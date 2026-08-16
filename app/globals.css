@@ -12,21 +12,28 @@
   --font-mono: var(--font-geist-mono);
 }
 
-/* Surbrillance des stats prioritaires du palier (lib/stats -> highlightClass).
-   Le liseré s'allume et s'éteint ; le texte, lui, ne bouge pas — un
-   `animate-pulse` aurait fait clignoter la valeur elle-même, donc illisible.
+/* Surbrillance du palier (lib/stats -> highlightClass / highlightFieldClass /
+   alertClass). Le liseré s'allume et s'éteint ; le texte, lui, ne bouge pas —
+   un `animate-pulse` aurait fait clignoter la valeur elle-même, donc illisible.
    C'est l'animation qui dessine le liseré, pas un `ring-*` : les deux
-   utilisent box-shadow et se remplaceraient l'un l'autre. */
+   utilisent box-shadow et se remplaceraient l'un l'autre.
+
+   Le liseré est INTÉRIEUR (`inset`), et ce n'est pas cosmétique : dessiné à
+   l'extérieur, il n'apparaît pas du tout sur une cellule de tableau. Les
+   cellules voisines, opaques et collées, le recouvrent — vérifié le
+   2026-08-16, y compris avec `position: relative` + `z-index`, qui n'y
+   changent rien. Seul l'inset survit, et il rend correctement partout
+   ailleurs. Ne pas repasser en externe. */
 @theme {
   --animate-stat-blink: stat-blink 1.4s ease-in-out infinite;
 
   @keyframes stat-blink {
     0%,
     100% {
-      box-shadow: 0 0 0 2px var(--color-blue-400);
+      box-shadow: inset 0 0 0 2px var(--color-blue-400);
     }
     50% {
-      box-shadow: 0 0 0 2px transparent;
+      box-shadow: inset 0 0 0 2px transparent;
     }
   }
 }
@@ -37,8 +44,20 @@
 @media (prefers-reduced-motion: reduce) {
   .animate-stat-blink {
     animation: none;
-    box-shadow: 0 0 0 2px var(--color-blue-400);
+    box-shadow: inset 0 0 0 2px var(--color-blue-400);
   }
+}
+
+/* Contour FIXE des en-têtes de colonne (lib/stats -> highlightClass /
+   highlightFieldClass). Deux signaux distincts, donc deux rendus distincts :
+   l'en-tête dit « ton palier travaille ça » et ne bouge pas ; seule la cellule
+   clignote, et seulement quand il y a un problème sur cette game. Vingt
+   colonnes clignotantes en permanence noieraient l'alerte qui compte.
+
+   `inset` pour la même raison que l'animation : un contour extérieur est
+   recouvert par les cellules voisines et n'apparaît pas du tout. */
+.stat-outline {
+  box-shadow: inset 0 0 0 2px var(--color-blue-400);
 }
 
 @media (prefers-color-scheme: dark) {

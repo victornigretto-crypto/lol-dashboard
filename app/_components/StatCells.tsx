@@ -2,12 +2,19 @@
 // CS/min après 20 min, morts/10 min. Partagées par / et /suivi pour que le
 // code couleur, la surbrillance clignotante et l'infobulle des morts ne
 // puissent pas diverger entre les deux pages.
+//
+// Règle du clignotement, IDENTIQUE partout : une case n'alerte que si son
+// palier demande de surveiller cette stat ET que la valeur est rouge. Une case
+// grise (seuils inconnus) ne clignote donc jamais — on n'alerte pas sur ce
+// qu'on ne sait pas juger.
 import {
+  alertClass,
+  csBand,
   csClass,
   csMetrics,
+  deathsBand,
   deathsClass,
   explainsDeaths,
-  highlightClass,
   weightedDeaths10,
   DEATHS_EXPLANATION,
   type CsSource,
@@ -38,21 +45,39 @@ export function StatCells({
   const deathsForColour = weightedDeaths10(game);
   const explained = explainsDeaths(game);
 
+  // La bande sert deux fois : la couleur de fond et le déclenchement du
+  // clignotement.
+  const bandPre20 = csBand(perMinPre20, thresholds?.csPre20 ?? null);
+  const bandPost20 = csBand(perMinPost20, thresholds?.csPost20 ?? null);
+  const bandDeaths = deathsBand(deathsForColour, thresholds?.deaths10 ?? null);
+
   return (
     <>
-      <div className={base + csClass(perMinPre20, thresholds?.csPre20 ?? null) + highlightClass(content, "csPre20")}>
+      <div
+        className={
+          base +
+          csClass(perMinPre20, thresholds?.csPre20 ?? null) +
+          alertClass(content, "csPre20", bandPre20)
+        }
+      >
         <p className="text-[10px] leading-tight opacity-80">CS/min à 20min</p>
         <p>{perMinPre20 ?? "—"}</p>
       </div>
       <div
-        className={base + csClass(perMinPost20, thresholds?.csPost20 ?? null) + highlightClass(content, "csPost20")}
+        className={
+          base +
+          csClass(perMinPost20, thresholds?.csPost20 ?? null) +
+          alertClass(content, "csPost20", bandPost20)
+        }
       >
         <p className="text-[10px] leading-tight opacity-80">CS/min après 20min</p>
         <p>{perMinPost20 ?? "—"}</p>
       </div>
       <div
         className={
-          base + deathsClass(deathsForColour, thresholds?.deaths10 ?? null) + highlightClass(content, "deaths10")
+          base +
+          deathsClass(deathsForColour, thresholds?.deaths10 ?? null) +
+          alertClass(content, "deaths10", bandDeaths)
         }
       >
         <p className="text-[10px] leading-tight opacity-80">Morts/10m</p>

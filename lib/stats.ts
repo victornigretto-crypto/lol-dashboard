@@ -5,7 +5,7 @@
 // Les couleurs sont RELATIVES au palier (lib/content/thresholds), jamais à une
 // échelle absolue : 132 CS à 20 min, c'est bon en Iron et faible en Émeraude.
 import { csPerMin } from "@/lib/riot/transform";
-import type { StatKey, StatThreshold, TierContent } from "@/lib/content";
+import type { FieldKey, StatKey, StatThreshold, TierContent } from "@/lib/content";
 
 // Champs bruts tels que stockés en base / renvoyés par /api/riot/import.
 // Aucune colonne dérivée : tout ce qui suit est calculé à la lecture.
@@ -180,13 +180,42 @@ export function deathsClass(value: number | null, threshold: StatThreshold | nul
   return bandClass(deathsBand(value, threshold));
 }
 
-// Une stat mise en avant par le contenu du palier clignote : c'est celle sur
-// laquelle ce palier doit se concentrer en priorité. L'animation est définie
-// dans app/globals.css (elle dessine le liseré elle-même, d'où l'absence de
-// `ring-*` ici : les deux se disputeraient la même propriété box-shadow).
-// Concaténé à une classe de couleur, d'où l'espace initial.
-const HIGHLIGHT_CLASS = " animate-stat-blink";
+// Deux rendus, définis dans app/globals.css, concaténés à une classe de
+// couleur d'où l'espace initial :
+//   - OUTLINE : contour bleu FIXE, pour les en-têtes de colonne. Constant,
+//     il ne doit pas bouger — sinon la moitié du tableau clignoterait en
+//     permanence et l'alerte réelle passerait inaperçue.
+//   - BLINK : contour CLIGNOTANT, réservé aux cellules en alerte.
+// Les deux dessinent leur liseré en `inset` : à l'extérieur, il est recouvert
+// par les cellules voisines et n'apparaît pas du tout (vérifié 2026-08-16).
+const OUTLINE_CLASS = " stat-outline";
+const BLINK_CLASS = " animate-stat-blink";
 
 export function highlightClass(content: TierContent, stat: StatKey): string {
-  return content.highlightStats.includes(stat) ? HIGHLIGHT_CLASS : "";
+  return content.highlightStats.includes(stat) ? OUTLINE_CLASS : "";
+}
+
+// Même surbrillance, appliquée cette fois à une colonne de QUESTIONS : à
+// partir d'argent, plusieurs paliers demandent de se concentrer sur une
+// question à remplir plutôt que sur une valeur chiffrée. Même classe donc même
+// animation — un second effet visuel pour dire la même chose serait une
+// divergence de plus à maintenir.
+export function highlightFieldClass(content: TierContent, field: FieldKey): string {
+  return content.highlightFields.includes(field) ? OUTLINE_CLASS : "";
+}
+
+// Deux signaux différents, portés par le même clignotement mais pas au même
+// endroit :
+//   - l'EN-TÊTE dit ce que ce palier doit travailler (highlightStats /
+//     highlightFields) — constant, indépendant des games ;
+//   - la CELLULE n'alerte que si les DEUX conditions sont réunies : le palier
+//     demande de surveiller cette stat, ET la valeur est rouge.
+//
+// Le croisement est le point important. Sur le seul rouge, un joueur platine
+// verrait clignoter son CS avant 20 min alors que son palier lui demande de
+// travailler le side lane : l'alerte désignerait la mauvaise chose. Sur le
+// seul palier, une case verte clignoterait, ce qui se lit comme un problème
+// là où il n'y en a pas.
+export function alertClass(content: TierContent, stat: StatKey, band: Band): string {
+  return content.highlightStats.includes(stat) && band === "bad" ? BLINK_CLASS : "";
 }

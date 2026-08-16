@@ -46,10 +46,22 @@ gratuite et sans compte ; le suivi dans la durée demande un compte.
 
 ---
 
-## État actuel — 2026-08-16
+## État actuel — 2026-08-17
 
 **Stack :** Next.js 16.2.12 (App Router) · React 19.2.4 · Tailwind 4 · Supabase
-(auth + Postgres) · API Riot Games (dev key, EUW en dur).
+(auth + Postgres) · API Riot Games (dev key, EUW en dur) · **Vitest** pour les tests.
+
+> ### Le cockpit est un tableau depuis le 2026-08-17
+> `/suivi` n'affiche plus des cartes mais un **tableau type tableur** : 9 colonnes
+> (matchup · V/D · CS/20min · CS après 20min · morts/10min · les 3 questions du palier ·
+> résumé), hauteur de ligne suivant le contenu, saisie directe dans la cellule. Le
+> conteneur est passé à **1600 px** — en dessous d'environ **1510 px de viewport**, le
+> tableau défile horizontalement à l'intérieur de son cadre (la page, elle, ne déborde
+> jamais). **Le mobile est hors périmètre, décision assumée.**
+>
+> **Signalement, deux niveaux à ne pas confondre :** l'**en-tête** porte un contour bleu
+> **fixe** = ce que ton palier doit travailler ; la **cellule** **clignote** uniquement si
+> le palier surveille cette stat **ET** qu'elle est rouge.
 
 > ### Le cache partagé de parties (2026-08-16)
 > `match_facts` cache les faits d'une partie par `(riot_match_id, puuid)`, **hors de tout
@@ -89,8 +101,14 @@ gratuite et sans compte ; le suivi dans la durée demande un compte.
 
 **Ce qui marche, vérifié en session :** import Riot de bout en bout (compte → 20 games →
 rang), cache en base, garde-fou anti-pollution, auth Supabase complète (login / signup /
-reset / confirmation), les couleurs relatives au palier. `tsc --noEmit` et `npm run build`
-passent.
+reset / confirmation), les couleurs relatives au palier. `tsc --noEmit`, `npm run test`
+(97 assertions) et `npm run build` passent.
+
+**Le contenu pédagogique a été entièrement réécrit par Victor le 2026-08-17** pour les
+6 paliers écrits (iron → emerald) : intro, points de progression, et les 3 questions.
+Deux incohérences internes assumées par lui et laissées telles quelles : les cibles de
+farm des textes ne s'alignent pas toujours sur les seuils de couleur, et émeraude (donc
+diamant → challenger) n'a plus aucune stat mise en avant.
 
 **Vérifié seulement par le code, pas en vrai** (demande une session connectée, donc à
 confirmer avec Victor) : la suppression des données à l'ancien profil lors d'un changement
@@ -110,6 +128,37 @@ même sans contenu écrit.
 ---
 
 ## Journal des sessions
+
+### 2026-08-17 — Cockpit en tableau, contenu des 6 paliers, outillage de test
+
+**Contexte** — suite de la même session que l'entrée du 2026-08-16 : parcours public,
+puis refonte du cockpit et rédaction du contenu pédagogique.
+
+**Changé**
+- Outillage : **Vitest** installé (`npm run test` / `test:watch`), **97 assertions** sur
+  `lib/`. Definition of done dans [CLAUDE.md](CLAUDE.md) + garde-fous (rien à l'échelle
+  système sur cette machine, rien de destructif sans demande).
+- MEMOIRE.md borné à 3 entrées, le reste dans [MEMOIRE_ARCHIVE.md](MEMOIRE_ARCHIVE.md).
+  `supabase/migrations/` créé avec sa convention.
+- Parcours public : bandeau bleu **« Me connecter pour analyser ma progression »** sur `/`
+  et sur l'écran de résultat ; déconnexion vers `/` ; « Continuer sans se connecter » sur
+  `/login` ; le mot « gratuite » retiré de l'UI.
+- `/suivi` : les cartes deviennent un **tableau type tableur** (9 colonnes, hauteur de
+  ligne variable, saisie dans la cellule, réponses multiples conservées). Conteneur élargi
+  à **1600 px** — choix de Victor contre l'alternative du panneau d'analyse repliable.
+- **Contenu réécrit pour les 6 paliers** (intro, points, 3 questions) + nouveau
+  `highlightFields` pour mettre une question en avant, pas seulement une stat.
+- Signalement : **contour bleu fixe sur l'en-tête** (ce que le palier travaille),
+  **clignotement sur la cellule** seulement si le palier surveille la stat ET qu'elle est
+  rouge.
+
+**Vérifié** — `tsc --noEmit`, `npm run test` (97), `npm run build` (13 pages) : les trois
+passent. Rendu et mesures (largeurs, hauteurs de ligne, contours) faits sur maquette servie
+avec le **CSS compilé de l'app**. **Non vérifié en conditions réelles** : `/suivi` exige une
+session, et l'accueil reste incapturable en headless.
+
+**Reste ouvert** — mobile hors périmètre (sous ~1510 px de viewport le tableau défile
+horizontalement) ; `bucketThemes` décrit encore l'ancien contenu et reste code mort.
 
 ### 2026-08-16 — Le cache partagé : une recherche coûtait 86 appels Riot pour un quota de 100
 
@@ -317,15 +366,20 @@ Vu et validé sur la capture du 2026-08-13 :
 
 Reste vraiment à vérifier :
 
-- [ ] **L'accueil `/` et l'écran de résultat de l'analyse gratuite** après la refonte du
-      2026-08-16 (bandeaux bleus + disposition reprise de `/suivi`). **Non vérifiés
-      visuellement** : Chrome headless reste bloqué sur `LoadingDots` sur `/`, alors que la
-      page marche dans un vrai navigateur (voir le journal). `tsc` passe, le reste est de la
-      relecture. **20 secondes d'œil suffisent à lever le doute.**
-- [ ] **`/suivi` affiche bien les 20 games ET les notes** après le passage au cache partagé.
-      L'écriture dans `games` a changé (toutes les lignes affichées, plus seulement les
-      nouvelles) et ce chemin exige une session connectée : jamais exécuté en test. Le
-      bandeau et les recommandations, eux, sont confirmés par capture du 2026-08-16.
+- [ ] **Le tableau de `/suivi` avec de vraies données.** Refonte complète du 2026-08-17,
+      **jamais vue en conditions réelles** : `/suivi` exige une session. À regarder en
+      priorité — la saisie dans les cellules, l'ajout d'une réponse (« Autre chose ? »), la
+      hauteur de ligne qui suit le contenu, et surtout que **les notes existantes soient
+      toujours là**.
+- [ ] **L'accueil `/` et l'écran de résultat** après la refonte des bandeaux bleus.
+      **Non vérifiés visuellement** : Chrome headless reste bloqué sur `LoadingDots` sur
+      `/` (`supabase.auth.getUser()` ne résout jamais, aucune requête émise ; piste :
+      `navigator.locks`), alors que la page marche dans un vrai navigateur. **20 secondes
+      d'œil suffisent à lever le doute.**
+- [ ] **Le signalement en vrai.** Contour fixe des en-têtes et clignotement des cellules
+      n'ont été validés que sur maquette avec le CSS compilé. En platine seul « CS après
+      20 min » est concerné : un compte iron → gold montre davantage (Lemyy#1376 est
+      **iron III**, les 3 en-têtes doivent y être contourés).
 - [ ] **Le clignotement des stats prioritaires** est agréable et pas épileptique (1,4 s par
       cycle — à ajuster dans [globals.css](app/globals.css)). Non vérifiable sur une capture,
       et invisible en platine dont `highlightStats` est vide : il faut un compte iron → gold.
@@ -367,6 +421,7 @@ pas du code.
 - [ ] **Code mort à supprimer** (~15 min, sans risque) :
       - `bucketThemes` — déclaré dans le type et rempli pour les 6 paliers, **lu nulle part**.
         Fait doublon avec `fieldQuestions`, qui est le seul branché (dans `/suivi`).
+        Depuis la réécriture du 2026-08-17 il décrit en plus du contenu qui n'existe plus.
       - `secondary_role` — demandé au joueur à l'onboarding, écrit en base, jamais relu.
       - `wins` / `losses` — remontés par les deux routes API jusqu'au state React, jamais affichés.
 - [ ] **`/suivi` ne vérifie pas `onboarded_at`** — un user connecté mais pas onboardé qui
@@ -407,6 +462,13 @@ Priorités posées par Victor : **fluidité** d'abord, et **tenir la montée en 
       parallèle font s'afficher le winrate SoloQ sans attendre l'analyse ranked. Dériver la
       SoloQ depuis `ranked` aurait réduit l'échantillon de façon **variable selon le
       joueur** — une régression statistique invisible en test.
+
+- [ ] **Le mobile du tableau de `/suivi`.** Hors périmètre, décision assumée du
+      2026-08-17. Constat mesuré : la page ne déborde jamais, mais sous ~1510 px de
+      viewport le tableau défile horizontalement dans son cadre (356 px visibles à 390 px
+      d'écran, 922 px à 1280 px). Sur un portable 1280/1440 c'est déjà sensible — le
+      panneau d'analyse repliable (option B écartée ce jour) redeviendrait pertinent, **en
+      complément** de l'élargissement, pas à sa place.
 
 ### Infra / sécurité
 
@@ -459,6 +521,16 @@ Les décisions qu'il ne faut pas défaire sans raison — elles ont chacune coû
   Corollaire de sécurité : cette table n'a **aucune policy RLS** et n'est écrite que par la
   clé `service_role`, parce qu'aucune policy SQL ne peut vérifier qu'une ligne vient bien
   de Riot.
+- **Les liserés bleus se dessinent en `inset`, jamais à l'extérieur.** Un `box-shadow`
+  extérieur sur une cellule de tableau **n'apparaît pas du tout** : les cellules voisines,
+  opaques et collées, le recouvrent. `getComputedStyle` renvoie pourtant l'ombre, donc le
+  bug est invisible en relecture. Mesuré le 2026-08-16 : ni `border-collapse: separate`, ni
+  `position: relative` + `z-index` n'y changent quoi que ce soit — seul l'`inset` rend.
+- **Deux signaux, deux rendus.** L'**en-tête** porte un contour **fixe** (« ton palier
+  travaille ça », constant) ; la **cellule clignote** (« ça cloche ici, sur cette game »),
+  et seulement au croisement **palier surveillé × valeur rouge**. Les confondre casse les
+  deux : sur le seul rouge l'alerte désigne la mauvaise stat, sur le seul palier une case
+  verte clignote, et en iron cinq en-têtes clignotants noieraient l'unique case à corriger.
 - **Tout cache se valide par comparaison octet-à-octet chaud / froid.** Un cache dont la
   sortie diffère de la source, même sur un détail de format, n'est plus transparent — et
   l'écart ne se voit dans aucun log. C'est ce test qui a attrapé le `+00:00` / `Z` du

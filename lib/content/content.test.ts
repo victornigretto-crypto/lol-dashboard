@@ -21,6 +21,55 @@ describe("getContent — contenu reellement ecrit", () => {
       expect(content.focusIntro, `palier ${tier}`).not.toBe(FALLBACK_CONTENT.focusIntro);
     }
   });
+
+  it("pose les 3 questions a chaque palier ecrit, jamais vides", () => {
+    for (const tier of WRITTEN_TIERS) {
+      const { fieldQuestions } = getContent("mid", tier);
+      for (const key of ["lane", "macro", "fight"] as const) {
+        expect(fieldQuestions[key].trim(), `${tier} / ${key}`).not.toBe("");
+      }
+    }
+  });
+});
+
+// La surbrillance vise soit une STAT chiffree, soit un CHAMP a remplir : a
+// partir d'argent, plusieurs paliers demandent de se concentrer sur une
+// question plutot que sur un nombre. Ces attentes viennent des consignes de
+// Victor du 2026-08-16.
+describe("surbrillance par palier", () => {
+  it("met en avant les stats attendues", () => {
+    expect(getContent("mid", "iron").highlightStats).toEqual(["csPre20", "csPost20", "deaths10"]);
+    expect(getContent("mid", "bronze").highlightStats).toEqual(["csPre20", "csPost20", "deaths10"]);
+    expect(getContent("mid", "silver").highlightStats).toEqual(["deaths10", "csPost20"]);
+    expect(getContent("mid", "gold").highlightStats).toEqual(["deaths10", "csPost20"]);
+    expect(getContent("mid", "platinum").highlightStats).toEqual(["csPost20"]);
+    expect(getContent("mid", "emerald").highlightStats).toEqual([]);
+  });
+
+  it("met en avant les champs attendus", () => {
+    expect(getContent("mid", "iron").highlightFields).toEqual([]);
+    expect(getContent("mid", "bronze").highlightFields).toEqual([]);
+    expect(getContent("mid", "silver").highlightFields).toEqual(["lane"]);
+    expect(getContent("mid", "gold").highlightFields).toEqual(["lane"]);
+    expect(getContent("mid", "platinum").highlightFields).toEqual(["lane", "macro"]);
+    // Emeraude : les trois champs, aucune stat.
+    expect(getContent("mid", "emerald").highlightFields).toEqual(["lane", "macro", "fight"]);
+  });
+
+  it("ne met rien en avant sans palier connu", () => {
+    expect(getContent("mid", "unranked").highlightStats).toEqual([]);
+    expect(getContent("mid", "unranked").highlightFields).toEqual([]);
+  });
+
+  // Une clé mal orthographiée ne planterait pas : elle ne ferait
+  // silencieusement clignoter personne. On vérifie donc le domaine.
+  it("n'emploie que des clés de champ valides", () => {
+    for (const tier of WRITTEN_TIERS) {
+      for (const field of getContent("mid", tier).highlightFields) {
+        expect(["lane", "macro", "fight"], `palier ${tier}`).toContain(field);
+      }
+    }
+  });
 });
 
 describe("getContent — emprunt", () => {
@@ -36,6 +85,7 @@ describe("getContent — emprunt", () => {
       expect(borrowed.focusPoints, `palier ${tier}`).toEqual(emerald.focusPoints);
       expect(borrowed.fieldQuestions, `palier ${tier}`).toEqual(emerald.fieldQuestions);
       expect(borrowed.highlightStats, `palier ${tier}`).toEqual(emerald.highlightStats);
+      expect(borrowed.highlightFields, `palier ${tier}`).toEqual(emerald.highlightFields);
     }
   });
 
@@ -46,6 +96,7 @@ describe("getContent — emprunt", () => {
       expect(borrowed.inDevelopment, `role ${role}`).toBe(true);
       expect(borrowed.fieldQuestions, `role ${role}`).toEqual(mid.fieldQuestions);
       expect(borrowed.highlightStats, `role ${role}`).toEqual(mid.highlightStats);
+      expect(borrowed.highlightFields, `role ${role}`).toEqual(mid.highlightFields);
     }
   });
 

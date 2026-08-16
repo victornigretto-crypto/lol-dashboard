@@ -111,17 +111,26 @@ const ROLE_LABELS: Record<Role, string> = {
 // publique. Défini une fois et utilisé aux deux endroits (écran de recherche
 // et écran de résultat) : deux copies finiraient par diverger de texte ou de
 // style, comme l'avaient fait les bandeaux d'analyse avant d'être regroupés
-// dans lib/banners.
-function AnalyzeErrorsBanner({ label }: { label: string }) {
+// dans lib/banners. Le texte n'est volontairement PAS un paramètre — il est le
+// même partout, et un paramètre finirait par porter deux formulations.
+//
+// Pilule bleu vif pleine largeur, dans l'esprit du bandeau d'op.gg : c'est le
+// seul élément massivement coloré de la page, donc le seul qui se lise comme
+// une action et non comme un panneau d'information (les panneaux, eux, restent
+// en bleu translucide sur fond ardoise).
+// Pas de flèche : le libellé dit déjà l'action, et la pilule bleue dit déjà
+// qu'on clique. `size` reste le seul paramètre — l'accueil s'aligne sur le
+// champ de recherche, l'écran de résultat prend toute la largeur.
+function AnalyzeErrorsBanner({ size = "normal" }: { size?: "normal" | "large" }) {
   return (
     <Link
       href="/login"
-      className="flex items-center justify-between gap-4 rounded-2xl border border-blue-500/40 bg-blue-500/10 px-5 py-4 transition hover:border-blue-400/60 hover:bg-blue-500/20"
+      className={
+        "flex w-full items-center justify-center rounded-full bg-blue-500 text-center font-semibold text-white transition hover:bg-blue-400 " +
+        (size === "large" ? "px-8 py-4 text-base sm:text-lg" : "px-6 py-3 text-sm sm:text-base")
+      }
     >
-      <span className="font-semibold text-blue-200">{label}</span>
-      <span aria-hidden className="shrink-0 text-lg text-blue-300">
-        →
-      </span>
+      Me connecter pour analyser ma progression
     </Link>
   );
 }
@@ -382,7 +391,7 @@ export default function Home() {
         <div className="relative flex flex-col items-center justify-center overflow-hidden px-4 pt-20 pb-32 text-center">
           <div className="pointer-events-none absolute -top-32 left-1/2 h-96 w-96 -translate-x-1/2 rounded-full bg-blue-600/20 blur-3xl" />
           <h1 className="relative text-5xl font-bold tracking-tight">GG Dashboard</h1>
-          <p className="relative mt-3 text-lg text-slate-400">Analyse gratuite de ton profil League of Legends</p>
+          <p className="relative mt-3 text-lg text-slate-400">Analyse de ton profil League of Legends</p>
 
           <form onSubmit={handleSubmit} className="relative mt-10 flex w-full max-w-xl items-center gap-2">
             <input
@@ -407,8 +416,9 @@ export default function Home() {
           {/* Remplace l'ancien « Déjà un compte ? Connecte-toi » : on ne
               propose plus une formalité de compte, on nomme ce que le compte
               apporte. La destination reste la même. */}
-          <div className="relative mt-8 w-full max-w-xl text-left">
-            <AnalyzeErrorsBanner label="Je veux analyser mes erreurs" />
+          {/* Aligné sur la largeur du champ de recherche, juste en dessous. */}
+          <div className="relative mt-8 w-full max-w-xl">
+            <AnalyzeErrorsBanner />
           </div>
         </div>
       ) : (
@@ -489,9 +499,12 @@ export default function Home() {
           </div>
 
           {/* Entre le quoi-travailler et l'historique : c'est là que le
-              visiteur vient de voir ses erreurs sans pouvoir les noter. */}
+              visiteur vient de voir ses erreurs sans pouvoir les noter. Pleine
+              largeur du cockpit et plus grand qu'à l'accueil — ici l'analyse a
+              déjà été livrée, c'est le moment où l'appel à l'action pèse le
+              plus. */}
           <div className="mb-6">
-            <AnalyzeErrorsBanner label="Analyser mes erreurs" />
+            <AnalyzeErrorsBanner size="large" />
           </div>
 
           <div className="grid grid-cols-1 gap-6 md:grid-cols-[300px_1fr]">

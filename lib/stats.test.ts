@@ -1,16 +1,19 @@
 import { describe, expect, it } from "vitest";
 import {
+  alertClass,
   averageCsPerMin,
   csBand,
   csMetrics,
   deathsBand,
   durationMinutes,
   explainsDeaths,
+  highlightClass,
+  highlightFieldClass,
   weightedDeaths10,
   type CsSource,
   type DeathsSource,
 } from "@/lib/stats";
-import type { StatThreshold } from "@/lib/content";
+import { getContent, type StatThreshold } from "@/lib/content";
 
 const cs = (cs20: number | null, cs_final: number | null, seconds: number | null): CsSource => ({
   cs20,
@@ -183,5 +186,83 @@ describe("csBand / deathsBand — sens de comparaison", () => {
     expect(csBand(8, null)).toBe("unknown");
     expect(deathsBand(null, morts)).toBe("unknown");
     expect(deathsBand(1, null)).toBe("unknown");
+  });
+});
+
+// Deux signaux, portes par le meme clignotement mais pas au meme endroit :
+// l'en-tete dit ce que le palier doit travailler, la cellule dit que CETTE
+// valeur pose probleme.
+describe("clignotement", () => {
+  const iron = getContent("mid", "iron"); // surveille les 3 stats
+  const platinum = getContent("mid", "platinum"); // ne surveille que csPost20
+
+  // Le croisement est la regle : palier ET rouge. C'est le cas rapporte par
+  // Victor le 2026-08-16 — en platine, seul le CS apres 20 min doit alerter,
+  // meme si les deux autres cases sont rouges.
+  it("exige a la fois le palier ET le rouge", () => {
+    expect(alertClass(iron, "csPre20", "bad")).not.toBe("");
+    expect(alertClass(platinum, "csPost20", "bad")).not.toBe("");
+  });
+
+  it("reste muet sur une stat rouge que le palier ne surveille pas", () => {
+    expect(alertClass(platinum, "csPre20", "bad")).toBe("");
+    expect(alertClass(platinum, "deaths10", "bad")).toBe("");
+  });
+
+  it("reste muet sur une stat surveillee mais pas rouge", () => {
+    expect(alertClass(iron, "csPre20", "warn")).toBe("");
+    expect(alertClass(iron, "csPre20", "good")).toBe("");
+  });
+
+  // On n'alerte pas sur ce qu'on ne sait pas juger : sans seuils de palier, la
+  // case est grise et doit rester muette.
+  it("une valeur non jugeable ne clignote jamais", () => {
+    expect(alertClass(iron, "csPre20", "unknown")).toBe("");
+    expect(alertClass(iron, "csPre20", csBand(4, null))).toBe("");
+    expect(alertClass(iron, "csPre20", csBand(null, { green: 8, yellow: 6 }))).toBe("");
+  });
+
+  // Emeraude ne surveille aucune stat : aucune cellule chiffree ne doit
+  // clignoter, quelle que soit la valeur.
+  it("ne clignote nulle part quand le palier ne surveille aucune stat", () => {
+    const emerald = getContent("mid", "emerald");
+    for (const stat of ["csPre20", "csPost20", "deaths10"] as const) {
+      expect(alertClass(emerald, stat, "bad"), stat).toBe("");
+    }
+  });
+
+  it("l'en-tete clignote selon le palier, independamment de toute valeur", () => {
+    expect(highlightClass(iron, "csPre20")).not.toBe("");
+    expect(highlightFieldClass(iron, "lane")).toBe("");
+
+    expect(highlightClass(platinum, "csPost20")).not.toBe("");
+    expect(highlightClass(platinum, "csPre20")).toBe("");
+    expect(highlightFieldClass(platinum, "lane")).not.toBe("");
+    expect(highlightFieldClass(platinum, "macro")).not.toBe("");
+    expect(highlightFieldClass(platinum, "fight")).toBe("");
+  });
+
+  // Deux signaux differents, donc deux rendus differents (demande de Victor du
+  // 2026-08-16) : l'en-tete porte un contour FIXE, seule la cellule clignote.
+  // Les faire se ressembler noierait l'alerte au milieu d'en-tetes agites.
+  it("distingue le contour fixe de l'en-tete du clignotement de la cellule", () => {
+    const entete = highlightClass(iron, "csPre20");
+    const cellule = alertClass(iron, "csPre20", "bad");
+
+    expect(entete).not.toBe("");
+    expect(cellule).not.toBe("");
+    expect(entete).not.toBe(cellule);
+
+    // Aucun en-tete ne doit porter d'animation, ni cote stat ni cote champ.
+    expect(entete).not.toContain("animate");
+    expect(highlightFieldClass(platinum, "lane")).not.toContain("animate");
+    expect(cellule).toContain("animate");
+  });
+
+  // Les deux en-tetes (stat et champ) partagent le meme contour : rien ne
+  // justifierait qu'une colonne chiffree et une colonne de question se
+  // signalent differemment.
+  it("emploie le meme contour pour les en-tetes de stat et de champ", () => {
+    expect(highlightClass(platinum, "csPost20")).toBe(highlightFieldClass(platinum, "lane"));
   });
 });
