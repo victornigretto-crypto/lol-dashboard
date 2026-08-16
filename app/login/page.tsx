@@ -1,5 +1,6 @@
 "use client";
 import React, { Suspense, useState } from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
@@ -97,7 +98,17 @@ function LoginForm() {
     mode === "login" ? "Connexion" : mode === "signup" ? "Créer un compte" : "Mot de passe oublié";
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-slate-950 p-4 text-slate-100">
+    <main className="relative flex min-h-screen items-center justify-center bg-slate-950 p-4 text-slate-100">
+      {/* Sortie de secours : arriver ici ne doit jamais être un cul-de-sac,
+          l'analyse gratuite reste accessible sans compte. Placé en haut à
+          gauche, hors de la carte, pour ne pas concurrencer le formulaire. */}
+      <Link
+        href="/"
+        className="absolute top-4 left-4 rounded-full border border-slate-700 px-4 py-1.5 text-sm text-slate-300 hover:bg-slate-800 hover:text-slate-100"
+      >
+        ← Continuer sans se connecter
+      </Link>
+
       <div className="w-full max-w-sm rounded-2xl border border-slate-700 bg-slate-900/90 p-6 shadow-sm">
         <p className="text-sm uppercase tracking-[0.3em] text-slate-400">GG Dashboard</p>
         <h1 className="mt-2 text-2xl font-semibold">{title}</h1>

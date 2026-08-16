@@ -10,6 +10,7 @@ import {
   getContent,
   thresholdsOf,
   tierFromRiotTier,
+  type Role,
   type TierContent,
   type TierThresholds,
 } from "@/lib/content";
@@ -96,6 +97,33 @@ function isRecent(playedAt: string): boolean {
 
 function filterRecent(games: RiotGame[]): RiotGame[] {
   return games.filter((g) => isRecent(g.played_at));
+}
+
+const ROLE_LABELS: Record<Role, string> = {
+  mid: "Mid",
+  top: "Top",
+  jungle: "Jungle",
+  adc: "ADC",
+  support: "Support",
+};
+
+// Le pont vers l'inscription, seul et même appel à l'action de la page
+// publique. Défini une fois et utilisé aux deux endroits (écran de recherche
+// et écran de résultat) : deux copies finiraient par diverger de texte ou de
+// style, comme l'avaient fait les bandeaux d'analyse avant d'être regroupés
+// dans lib/banners.
+function AnalyzeErrorsBanner({ label }: { label: string }) {
+  return (
+    <Link
+      href="/login"
+      className="flex items-center justify-between gap-4 rounded-2xl border border-blue-500/40 bg-blue-500/10 px-5 py-4 transition hover:border-blue-400/60 hover:bg-blue-500/20"
+    >
+      <span className="font-semibold text-blue-200">{label}</span>
+      <span aria-hidden className="shrink-0 text-lg text-blue-300">
+        →
+      </span>
+    </Link>
+  );
 }
 
 function winrateBanner(games: RiotGame[]): Banner | null {
@@ -329,6 +357,10 @@ export default function Home() {
   const olderGames = games.filter((g) => !isRecent(g.played_at));
   const content = resolveContent(games, rank);
   const thresholds = resolveThresholds(rank);
+  // Le rôle affiché vient des games analysées, pas d'un `primary_role` en
+  // base : un compte public n'en a pas.
+  const dominant = dominantRole(games.map((g) => g.lane));
+  const roleLabel = dominant ? ROLE_LABELS[dominant] : null;
 
   if (checkingSession) {
     return (
@@ -372,52 +404,48 @@ export default function Home() {
 
           {error && <p className="relative mt-4 text-sm text-red-400">{error}</p>}
 
-          <p className="relative mt-6 text-xs text-slate-500">
-            Déjà un compte ?{" "}
-            <Link href="/login" className="underline hover:text-slate-300">
-              Connecte-toi
-            </Link>
-          </p>
+          {/* Remplace l'ancien « Déjà un compte ? Connecte-toi » : on ne
+              propose plus une formalité de compte, on nomme ce que le compte
+              apporte. La destination reste la même. */}
+          <div className="relative mt-8 w-full max-w-xl text-left">
+            <AnalyzeErrorsBanner label="Je veux analyser mes erreurs" />
+          </div>
         </div>
       ) : (
         <div className="mx-auto max-w-6xl px-4 pb-16">
-          <div className="mt-6 grid grid-cols-1 gap-6 md:grid-cols-[300px_1fr]">
-            <div className="flex flex-col gap-6">
-              <div className="rounded-2xl border border-slate-700 bg-slate-900/60 p-4 text-center md:text-left">
-                <h1 className="text-2xl font-bold break-words">
-                  {account.gameName}
-                  <span className="text-slate-500">#{account.tagLine}</span>
-                </h1>
-                <button
-                  onClick={handleNewSearch}
-                  className="mt-2 text-sm text-slate-400 underline hover:text-slate-200"
-                >
-                  Nouvelle recherche
-                </button>
-              </div>
-
-              <AnalysisPanel banners={banners} loading={analyzing} error={analyzeError} />
-
-              {!content.inDevelopment && (
-                <div className="rounded-2xl border border-slate-700 bg-slate-900/60 p-4">
-                  <h2 className="text-lg font-semibold text-slate-200">Sur quoi progresser</h2>
-                  <p className="mt-2 text-sm text-slate-300">{content.focusIntro}</p>
-                  <ul className="mt-3 flex flex-col gap-2">
-                    {content.focusPoints.map((point) => (
-                      <li key={point} className="flex items-start gap-2 text-sm text-slate-300">
-                        <span className="mt-0.5 shrink-0 text-blue-400">→</span>
-                        <span>{point}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
+          {/* Même disposition que le cockpit connecté (/suivi) : bandeau
+              d'identité en haut, « Sur quoi progresser » en pleine largeur,
+              puis l'analyse à gauche et l'historique à droite. Les deux écrans
+              montrent la même chose ; ils ne doivent pas la ranger
+              différemment. */}
+          <header className="mb-6 pt-4">
+            <div className="mb-3">
+              <button
+                onClick={handleNewSearch}
+                className="rounded-full border border-slate-700 px-4 py-1.5 text-sm text-slate-300 hover:bg-slate-800"
+              >
+                Nouvelle recherche
+              </button>
             </div>
 
-            <div className="flex flex-col gap-6">
-              <div className="flex min-h-[172px] flex-col items-center justify-center rounded-2xl border border-slate-700 bg-slate-900/60 p-4">
+            <div className="rounded-2xl border border-slate-700 bg-slate-900/90 p-5">
+              <div className="flex flex-wrap items-end justify-between gap-4">
+                <div className="min-w-0">
+                  <p className="text-sm uppercase tracking-[0.3em] text-blue-400">GG Dashboard</p>
+                  <h1 className="mt-3 text-3xl font-semibold break-words">
+                    {account.gameName}
+                    <span className="text-slate-500">#{account.tagLine}</span>
+                  </h1>
+                  {/* Ici le rôle se déduit des games analysées : un compte
+                      public n'a pas de `primary_role` en base. */}
+                  <p className="mt-1 text-slate-400">
+                    {roleLabel ? `Rôle principal : ${roleLabel}` : "Rôle principal en cours de détection"}
+                  </p>
+                </div>
+
+                {/* Emblème, palier, LP empilés — la disposition du client LoL. */}
                 {rank ? (
-                  <>
+                  <div className="flex shrink-0 flex-col items-center">
                     <img
                       src={rankEmblemUrl(rank.tier)}
                       alt={rank.tier}
@@ -426,65 +454,99 @@ export default function Home() {
                         e.currentTarget.style.display = "none";
                       }}
                     />
-                    <p className="mt-1 text-2xl font-bold">{rankLabel(rank.tier, rank.rank)}</p>
-                    <p className="text-slate-400">{rank.leaguePoints} LP</p>
-                  </>
+                    <p className="mt-1 text-lg font-semibold">{rankLabel(rank.tier, rank.rank)}</p>
+                    <p className="text-sm text-slate-400">{rank.leaguePoints} LP</p>
+                  </div>
                 ) : (
-                  <p className="text-slate-400">Non classé en SoloQ</p>
+                  <p className="shrink-0 text-slate-400">Non classé en SoloQ</p>
                 )}
               </div>
+            </div>
+          </header>
 
-              <div>
-                <div className="flex flex-wrap gap-2">
-                  {FILTERS.map((f) => (
-                    <button
-                      key={f.key}
-                      onClick={() => handleFilterChange(f.key)}
-                      disabled={loading}
-                      className={
-                        "rounded-full px-4 py-2 text-sm font-medium transition disabled:opacity-50 " +
-                        (filter === f.key
-                          ? "bg-blue-600 text-white"
-                          : "border border-slate-700 text-slate-300 hover:bg-slate-800")
-                      }
-                    >
-                      {f.label}
-                    </button>
+          {/* Visible même sans contenu écrit : on le dit franchement plutôt
+              que de faire disparaître le bloc (même choix que /suivi et
+              /onboarding). */}
+          <div className="mb-6 rounded-2xl border border-blue-500/40 bg-blue-500/10 p-5">
+            <h2 className="text-lg font-semibold text-blue-200">Sur quoi progresser</h2>
+            {content.inDevelopment ? (
+              <p className="mt-2 italic text-slate-400">
+                Pas encore développé pour ce palier et ce rôle.
+              </p>
+            ) : (
+              <>
+                <p className="mt-2 text-slate-200">{content.focusIntro}</p>
+                <ul className="mt-3 flex flex-col gap-2">
+                  {content.focusPoints.map((point) => (
+                    <li key={point} className="flex items-start gap-2 text-sm text-slate-300">
+                      <span className="mt-0.5 shrink-0 text-blue-400">→</span>
+                      <span>{point}</span>
+                    </li>
                   ))}
-                </div>
+                </ul>
+              </>
+            )}
+          </div>
 
-                {error && <p className="mt-4 text-center text-sm text-red-400">{error}</p>}
+          {/* Entre le quoi-travailler et l'historique : c'est là que le
+              visiteur vient de voir ses erreurs sans pouvoir les noter. */}
+          <div className="mb-6">
+            <AnalyzeErrorsBanner label="Analyser mes erreurs" />
+          </div>
 
-                <div className="mt-4 flex flex-col gap-2">
-                  {loading ? (
-                    <p className="text-center text-slate-400">Chargement des games...</p>
-                  ) : games.length === 0 ? (
-                    <p className="text-center text-slate-400">Aucune game trouvée pour ce filtre.</p>
-                  ) : (
-                    <>
-                      {recentGames.map((game) => (
+          <div className="grid grid-cols-1 gap-6 md:grid-cols-[300px_1fr]">
+            <AnalysisPanel banners={banners} loading={analyzing} error={analyzeError} />
+
+            <div className="flex min-w-0 flex-col">
+              <div className="flex flex-wrap gap-2">
+                {FILTERS.map((f) => (
+                  <button
+                    key={f.key}
+                    onClick={() => handleFilterChange(f.key)}
+                    disabled={loading}
+                    className={
+                      "rounded-full px-4 py-2 text-sm font-medium transition disabled:opacity-50 " +
+                      (filter === f.key
+                        ? "bg-blue-600 text-white"
+                        : "border border-slate-700 text-slate-300 hover:bg-slate-800")
+                    }
+                  >
+                    {f.label}
+                  </button>
+                ))}
+              </div>
+
+              {error && <p className="mt-4 text-center text-sm text-red-400">{error}</p>}
+
+              <div className="mt-4 flex flex-col gap-2">
+                {loading ? (
+                  <p className="text-center text-slate-400">Chargement des games...</p>
+                ) : games.length === 0 ? (
+                  <p className="text-center text-slate-400">Aucune game trouvée pour ce filtre.</p>
+                ) : (
+                  <>
+                    {recentGames.map((game) => (
+                      <GameRow key={game.riot_match_id} game={game} thresholds={thresholds} content={content} ddragonVersion={ddragonVersion} />
+                    ))}
+                    {recentGames.length === 0 && olderGames.length > 0 && (
+                      <p className="text-center text-slate-400">Aucune game de moins de 2 mois pour ce filtre.</p>
+                    )}
+                    {olderGames.length > 0 && (
+                      <button
+                        onClick={() => setShowOlder((v) => !v)}
+                        className="mt-2 rounded-lg border border-slate-700 px-4 py-2 text-sm text-slate-300 hover:bg-slate-800"
+                      >
+                        {showOlder
+                          ? "Masquer les parties datant de plus de 2 mois"
+                          : `Voir les parties datant de plus de 2 mois (${olderGames.length})`}
+                      </button>
+                    )}
+                    {showOlder &&
+                      olderGames.map((game) => (
                         <GameRow key={game.riot_match_id} game={game} thresholds={thresholds} content={content} ddragonVersion={ddragonVersion} />
                       ))}
-                      {recentGames.length === 0 && olderGames.length > 0 && (
-                        <p className="text-center text-slate-400">Aucune game de moins de 2 mois pour ce filtre.</p>
-                      )}
-                      {olderGames.length > 0 && (
-                        <button
-                          onClick={() => setShowOlder((v) => !v)}
-                          className="mt-2 rounded-lg border border-slate-700 px-4 py-2 text-sm text-slate-300 hover:bg-slate-800"
-                        >
-                          {showOlder
-                            ? "Masquer les parties datant de plus de 2 mois"
-                            : `Voir les parties datant de plus de 2 mois (${olderGames.length})`}
-                        </button>
-                      )}
-                      {showOlder &&
-                        olderGames.map((game) => (
-                          <GameRow key={game.riot_match_id} game={game} thresholds={thresholds} content={content} ddragonVersion={ddragonVersion} />
-                        ))}
-                    </>
-                  )}
-                </div>
+                  </>
+                )}
               </div>
             </div>
           </div>

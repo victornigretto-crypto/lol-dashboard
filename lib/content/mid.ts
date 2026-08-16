@@ -149,7 +149,25 @@ export function tierFromRiotTier(rawTier: string | null | undefined): Tier {
   return (RANKED_TIERS as string[]).includes(normalized) ? (normalized as Tier) : "unranked";
 }
 
+// Les paliers au-dessus d'émeraude n'ont pas de contenu écrit : ils
+// EMPRUNTENT celui d'émeraude, exactement comme les seuils de couleur le font
+// déjà (lib/content/thresholds.ts). Décision de Victor du 2026-08-13.
+const CONTENT_TIER: Partial<Record<Tier, Tier>> = {
+  diamond: "emerald",
+  master: "emerald",
+  grandmaster: "emerald",
+  challenger: "emerald",
+};
+
+// Un contenu emprunté — palier au-dessus d'émeraude, ou rôle autre que mid —
+// sert bien ses questions d'erreurs et sa surbrillance, mais reste marqué
+// `inDevelopment: true` : les recommandations, elles, ne sont pas transposables
+// telles quelles, et les pages affichent un avertissement franc à leur place.
+// Un palier sans contenu du tout (unranked) retombe sur le générique.
 export function getContent(role: Role, tier: Tier): TierContent {
-  if (role !== "mid") return FALLBACK_CONTENT;
-  return MID_CONTENT[tier] ?? FALLBACK_CONTENT;
+  const source = CONTENT_TIER[tier] ?? tier;
+  const written = MID_CONTENT[source];
+  if (!written) return FALLBACK_CONTENT;
+  if (role === "mid" && source === tier) return written;
+  return { ...written, inDevelopment: true };
 }

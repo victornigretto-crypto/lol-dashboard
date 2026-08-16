@@ -110,3 +110,59 @@ alter table public.games add column if not exists puuid text;
 -- calculee sur le rythme brut, jusqu'a ce qu'un reimport les complete.
 alter table public.games add column if not exists deaths integer;
 alter table public.games add column if not exists deaths_last5 integer;
+
+-- Cache PARTAGE des faits extraits d'une partie Riot.
+--
+-- Pourquoi une table separee de `games` : une partie terminee est une donnee
+-- PUBLIQUE et IMMUABLE. Les memes faits valent pour tout le monde, alors que
+-- `games` est la vue personnelle d'un user (ses notes, son user_id). Tant que
+-- le cache vivait uniquement dans `games`, l'analyse gratuite -- le parcours
+-- principal, celui de chaque visiteur non connecte -- etait le SEUL chemin
+-- sans aucun cache : chaque recherche retelechargait tout, et une recherche
+-- coutait ~86 appels Riot pour un quota de 100 par 2 minutes.
+--
+-- La cle est (riot_match_id, puuid) et non riot_match_id seul : une partie
+-- contient 10 joueurs, et les faits (CS, morts, champion) sont propres a
+-- chacun. Deux joueurs de la MEME partie se partagent donc bien le cache,
+-- chacun sur sa ligne.
+--
+-- On stocke les FAITS BRUTS extraits (cs20, cs_final, deaths, deaths_last5),
+-- jamais un calcul derive : meme regle que `games`. Les CS/min, la
+-- ponderation des morts et les couleurs restent calcules a la lecture. Cout :
+-- ~200 octets par ligne, contre ~900 Ko si on cachait la reponse brute de
+-- Riot (77 Ko le match + 827 Ko la timeline, mesures le 2026-08-16).
+create table if not exists public.match_facts (
+  riot_match_id text not null,
+  puuid text not null,
+  lane text not null default '',
+  champion text not null default '',
+  matchup text not null default '',
+  result text not null default 'Victoire',
+  cs20 numeric not null default 0,
+  deaths10 numeric not null default 0,
+  queue text not null default '',
+  played_at timestamptz not null,
+  cs_final numeric,
+  game_duration_seconds numeric,
+  deaths integer,
+  deaths_last5 integer,
+  cached_at timestamptz not null default now(),
+  primary key (riot_match_id, puuid)
+);
+
+alter table public.match_facts enable row level security;
+
+-- Aucune policy : RLS active sans policy = tout est refuse aux cles anon et
+-- authenticated. Le cache n'est lisible et inscriptible QUE par le serveur,
+-- via la cle service_role qui contourne RLS (cf. lib/supabase/admin.ts).
+--
+-- C'est deliberé, et c'est le point de securite de cette table. Ouvrir
+-- l'ecriture a `anon` permettrait a n'importe qui d'inserer de faux faits par
+-- l'API REST de Supabase : ils seraient ensuite servis a TOUS les autres
+-- utilisateurs comme s'ils venaient de Riot. Un empoisonnement de cache
+-- indetectable. Garder l'ecriture cote serveur est la seule protection, parce
+-- que rien dans une policy SQL ne peut verifier qu'une ligne vient bien de
+-- l'API Riot.
+--
+-- La lecture reste fermee elle aussi : `puuid` est un identifiant stable de
+-- joueur, inutile de le rendre enumerable publiquement.

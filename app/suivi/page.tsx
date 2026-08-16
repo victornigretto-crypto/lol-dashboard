@@ -219,9 +219,12 @@ export default function SuiviPage() {
     scheduleSave(id);
   };
 
+  // Retour à l'accueil et non à /login : se déconnecter n'est pas vouloir se
+  // reconnecter. L'accueil est la page publique d'analyse gratuite, donc on
+  // sort sur quelque chose d'utilisable plutôt que sur un formulaire.
   const handleLogout = async () => {
     await supabase.auth.signOut();
-    router.push("/login");
+    router.push("/");
     router.refresh();
   };
 
@@ -406,20 +409,29 @@ export default function SuiviPage() {
           </div>
         </header>
 
-        {!content.inDevelopment && (
-          <div className="mb-6 rounded-2xl border border-blue-500/40 bg-blue-500/10 p-5">
-            <h2 className="text-lg font-semibold text-blue-200">Sur quoi progresser</h2>
-            <p className="mt-2 text-slate-200">{content.focusIntro}</p>
-            <ul className="mt-3 flex flex-col gap-2">
-              {content.focusPoints.map((point) => (
-                <li key={point} className="flex items-start gap-2 text-sm text-slate-300">
-                  <span className="mt-0.5 shrink-0 text-blue-400">→</span>
-                  <span>{point}</span>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
+        {/* Le bloc reste visible même sans contenu écrit : on préfère dire
+            franchement qu'il n'existe pas encore plutôt que de le faire
+            disparaître sans explication. */}
+        <div className="mb-6 rounded-2xl border border-blue-500/40 bg-blue-500/10 p-5">
+          <h2 className="text-lg font-semibold text-blue-200">Sur quoi progresser</h2>
+          {content.inDevelopment ? (
+            <p className="mt-2 italic text-slate-400">
+              Pas encore développé pour ton palier et ton rôle.
+            </p>
+          ) : (
+            <>
+              <p className="mt-2 text-slate-200">{content.focusIntro}</p>
+              <ul className="mt-3 flex flex-col gap-2">
+                {content.focusPoints.map((point) => (
+                  <li key={point} className="flex items-start gap-2 text-sm text-slate-300">
+                    <span className="mt-0.5 shrink-0 text-blue-400">→</span>
+                    <span>{point}</span>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+        </div>
 
         {/* Même disposition que l'analyse gratuite : les bandeaux à gauche,
             l'historique à droite. Sur mobile la colonne de gauche passe

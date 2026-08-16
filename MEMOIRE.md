@@ -19,10 +19,23 @@ gratuite et sans compte ; le suivi dans la durée demande un compte.
 
 ---
 
-## État actuel — 2026-08-11
+## État actuel — 2026-08-16
 
 **Stack :** Next.js 16.2.12 (App Router) · React 19.2.4 · Tailwind 4 · Supabase
 (auth + Postgres) · API Riot Games (dev key, EUW en dur).
+
+> ### Le cache partagé de parties (2026-08-16)
+> `match_facts` cache les faits d'une partie par `(riot_match_id, puuid)`, **hors de tout
+> user**. Une recherche répétée passe de ~86 à ~6 appels Riot, de 6 s à **0,2 s**.
+> Deux prérequis d'environnement, tous deux en place chez Victor :
+> la table (migration lancée le 2026-08-16) et **`SUPABASE_SERVICE_ROLE_KEY` dans
+> `.env.local`** — sans elle le cache se désactive proprement et l'app retombe sur son
+> comportement d'avant, avec un avertissement dans les logs.
+> **Ne jamais préfixer cette clé `NEXT_PUBLIC_`** : elle contourne RLS.
+
+> **`npm run dev` refonctionne** depuis le 2026-08-13. Il figeait la machine à cause d'un
+> cache Turbopack corrompu (voir le journal) ; `.next` a été supprimé et le serveur sert
+> `/` en ~7 s, à froid comme à chaud. Aucun code n'a été modifié pour ça.
 
 **Le parcours complet, dans l'ordre :**
 
@@ -36,9 +49,10 @@ gratuite et sans compte ; le suivi dans la durée demande un compte.
              les games et les 3 champs d'erreurs à remplir
 ```
 
-> ### Migrations à jour au 2026-08-11
-> Deux vagues, **toutes deux lancées et confirmées par Victor** :
-> `games.puuid` (2026-08-10), puis `games.deaths` + `games.deaths_last5` (2026-08-11).
+> ### Migrations à jour au 2026-08-16
+> Trois vagues, **toutes lancées et confirmées par Victor** :
+> `games.puuid` (2026-08-10), `games.deaths` + `games.deaths_last5` (2026-08-11), puis la
+> table `match_facts` (2026-08-16).
 > Le schéma en base correspond donc à [supabase/schema.sql](supabase/schema.sql), et le
 > code sur `master` a ce qu'il lui faut.
 >
@@ -56,15 +70,245 @@ confirmer avec Victor) : la suppression des données à l'ancien profil lors d'u
 de compte, et le fait que les notes écrites à la main survivent au réimport (l'upsert ne
 liste pas ces colonnes, elles devraient donc être préservées).
 
-**Le trou principal :** le contenu pédagogique n'existe **que pour le rôle mid**, et
-seulement de **iron à emerald**. Tout le reste tombe sur `FALLBACK_CONTENT`
-(« En cours de développement ») : pas de focus, pas de questions d'erreurs sur mesure, pas
-de surbrillance. **Les couleurs, elles, ne dépendent plus du rôle** depuis le 2026-08-11 :
-un joueur top ou support a un tableau coloré même sans contenu écrit.
+**Le trou principal :** le contenu pédagogique n'est écrit **que pour le rôle mid**, et
+seulement de **iron à emerald**. Depuis le 2026-08-13 il est toutefois **emprunté** partout
+ailleurs — émeraude pour diamant → challenger, le mid du même palier pour les quatre autres
+rôles — donc questions d'erreurs et surbrillance sont servies à tout le monde. Seules les
+**recommandations** restent réservées au contenu réellement écrit : partout ailleurs, le
+bloc « Sur quoi progresser » affiche « Pas encore développé pour ton palier et ton rôle ».
+Il n'y a plus que `unranked` pour retomber sur le générique complet. **Les couleurs** ne
+dépendent plus du rôle depuis le 2026-08-11 : un joueur top ou support a un tableau coloré
+même sans contenu écrit.
 
 ---
 
 ## Journal des sessions
+
+### 2026-08-16 — Le cache partagé : une recherche coûtait 86 appels Riot pour un quota de 100
+
+**Le symptôme rapporté :** « il ne se passe rien quand j'appuie sur Entrée ». Il se passait
+quelque chose — le « ... » du bouton **est** l'indicateur de chargement
+([page.tsx:369](app/page.tsx#L369)) — mais la réponse mettait jusqu'à **3 minutes**. Le log
+du serveur montre l'emballement : `4.1s → 8.5s → 57s → 63s → 3.0min`.
+
+**La cause immédiate**, et le chiffre à retenir : **une seule recherche depuis l'accueil
+coûtait ~86 appels Riot, pour un quota de 100 par 2 minutes.** Le détail : `handleSubmit`
+appelle `search(riotId, "soloq")` (43 appels), **puis** `handleAnalyze` refait un import
+complet avec le filtre `ranked` (43 de plus) — et les deux listes se recouvrent largement,
+donc on retéléchargeait les mêmes parties 4 secondes après. Le log le confirme : les `POST
+/api/riot/import` arrivent **systématiquement par paires**. Victor ne pouvait donc pas
+faire deux recherches d'affilée sans saturer le quota ; ce n'était pas son comportement,
+c'était le premier clic.
+
+**La cause profonde — personne ne possédait l'accès à Riot.** `lib/riot/client.ts` était un
+wrapper de transport (URL + clé + retry naïf). Combien d'appels, à quelle fréquence, mis en
+cache ou pas, annulable ou pas : chaque appelant décidait dans son coin, et **le budget
+global n'appartenait à personne**. Corollaire structurel : le seul cache existant était
+`games`, indexé par `(user_id, puuid)` — donc **l'analyse gratuite, le parcours de chaque
+visiteur, était le seul chemin sans aucun cache**, et c'est aussi celui qui faisait le
+travail en double.
+
+**Ce qui a été livré : le cache partagé `match_facts`.** Une partie terminée est une donnée
+**publique et immuable** ; elle n'a rien à faire dans une table qui appartient à un user.
+Nouvelle table, clé `(riot_match_id, puuid)` — et pas `riot_match_id` seul, parce qu'une
+partie contient 10 joueurs dont les faits diffèrent. Deux joueurs de la même partie se
+partagent donc réellement le cache, chacun sur sa ligne : le bénéfice grandit avec le
+nombre d'utilisateurs, ce qui est la direction voulue par Victor (« potentiellement plus
+d'utilisateurs un jour »).
+
+| | avant | après |
+|---|---|---|
+| recherche à froid | 6,0 s | 3,3 s |
+| **recherche répétée** | **6,0 s** | **0,23 – 0,58 s** |
+| appels Riot, recherche répétée | ~86 | ~6 |
+
+**Trois décisions à ne pas défaire :**
+
+1. **On cache les faits extraits, jamais le brut.** Mesuré ce jour : un match pèse 77 Ko et
+   sa timeline **827 Ko** — 17,7 Mo pour 20 parties. Une ligne de `match_facts` fait
+   ~200 octets. Et ce sont les mêmes faits bruts que `games` (`cs20`, `cs_final`, `deaths`,
+   `deaths_last5`) : les CS/min, la pondération et les couleurs restent calculés à la
+   lecture, donc **une règle qui change n'oblige jamais à purger le cache**.
+2. **La table n'a AUCUNE policy RLS**, et c'est le point de sécurité. RLS active sans policy
+   = tout refusé à `anon` et `authenticated` ; seule la clé `service_role` passe
+   ([lib/supabase/admin.ts](lib/supabase/admin.ts)). Ouvrir l'écriture à `anon` permettrait
+   d'insérer de faux faits par l'API REST, **resservis ensuite à tous les autres
+   utilisateurs** comme s'ils venaient de Riot. Aucune policy SQL ne peut vérifier qu'une
+   ligne vient de Riot : garder l'écriture côté serveur est la seule protection.
+3. **`games` reçoit désormais TOUTES les lignes affichées, plus seulement les nouvelles.**
+   C'est le piège que le cache crée : une partie servie par `match_facts` n'est jamais
+   retéléchargée, donc en n'écrivant que les nouvelles elle n'atterrirait **jamais** dans les
+   games du joueur — et `/suivi`, qui lit `games` en direct, afficherait un cockpit vide.
+   L'upsert est idempotent et n'énumère toujours pas les colonnes de notes.
+
+L'invariant anti-pollution est intact : `persist` ne gouverne plus que `games`. Le cache
+partagé n'appartient à personne, l'alimenter depuis l'analyse d'un inconnu est sans risque.
+
+**Le bug attrapé par le test, et la leçon de méthode.** Après avoir branché le cache, j'ai
+comparé **octet pour octet** la réponse servie par le cache et celle d'un appel Riot
+complet, cache vidé puis reconstruit. Divergence de **exactement 100 octets** : Postgres
+rend un `timestamptz` en `...+00:00` là où `toISOString()` donne `...Z` — 5 caractères ×
+20 lignes. `new Date()` parse les deux à l'identique, donc **rien n'aurait cassé et rien ne
+serait jamais apparu dans un log** ; mais la même partie sortait avec deux `played_at`
+différents selon l'état du cache. Un cache dont la sortie dépend de son propre état n'est
+plus transparent. Normalisé à la lecture (`normalize` dans
+[matchCache.ts](lib/riot/matchCache.ts)), re-vérifié identique. **La comparaison
+octet-à-octet cache chaud / cache froid est LE test à refaire sur tout cache futur.**
+
+**Sécurité vérifiée dans les deux sens**, avec le contrôle anti-faux-positif : `INSERT`
+anonyme refusé (401), lecture anonyme à 0 ligne **alors que la table en contenait 20**, et
+la même clé anon renvoie bien 200 sur `games` — donc le refus vient de RLS et pas d'une clé
+invalide.
+
+**Dégradation gracieuse :** sans `SUPABASE_SERVICE_ROLE_KEY`, `createAdminClient()` renvoie
+`null`, un avertissement part dans les logs et l'app retombe exactement sur son
+comportement d'avant. Testé avant que la clé soit posée. Le cache est une optimisation,
+jamais une dépendance.
+
+**Clé Riot expirée, encore** (troisième fois). Même symptôme qu'au 13/08. À faire en premier
+réflexe le matin. La nouvelle clé a été relue par Next **sans redémarrage**, comme la
+dernière fois.
+
+**Parcours utilisateur — 4 changements demandés par Victor**, livrés :
+1. Accueil : le lien « Déjà un compte ? Connecte-toi » devient un bandeau bleu clair
+   **« Je veux analyser mes erreurs » → `/login`**. On ne propose plus une formalité de
+   compte, on nomme ce que le compte apporte.
+2. Écran de résultat de l'analyse gratuite : **reprend la disposition de `/suivi`** —
+   bandeau d'identité (Riot ID + rôle + rang empilé), « Sur quoi progresser » en pleine
+   largeur en bleu, puis analyse à gauche / historique à droite. Le rôle y est déduit des
+   games (`dominantRole`), un compte public n'ayant pas de `primary_role`.
+3. Un second bandeau **« Analyser mes erreurs »** s'intercale **entre les axes de
+   progression et l'historique** — là où le visiteur vient de voir ses erreurs sans pouvoir
+   les noter.
+4. La déconnexion mène à `/` et non `/login` ; `/login` gagne un
+   **« ← Continuer sans se connecter »** en haut à gauche. Arriver sur le formulaire n'est
+   plus un cul-de-sac.
+
+`AnalyzeErrorsBanner` est défini **une seule fois** dans `page.tsx` et utilisé aux deux
+endroits — deux copies auraient divergé, comme l'avaient fait les bandeaux d'analyse avant
+`lib/banners.ts`.
+
+**Ce qui N'A PAS pu être vérifié, et pourquoi.** J'ai piloté Chrome en CDP pour capturer les
+écrans. `/login` s'affiche et son lien de sortie est confirmé par requête DOM. Mais **`/`
+reste bloqué sur `LoadingDots` en headless** : `supabase.auth.getUser()` ne résout jamais et
+**aucune requête vers Supabase n'est émise** (toutes les requêtes réseau sont des chunks
+Next). Aucune exception, aucun 4xx, `localStorage` fonctionne, et `/login` s'hydrate
+normalement — donc React tourne. Reproduit en `--headless=new` **et** `--headless=old`.
+C'est un artefact du headless : l'accueil anonyme s'affiche bien dans le navigateur de
+Victor (capture au début de la session). **Piste pour la prochaine fois :** supabase-js
+sérialise ses accès session via `navigator.locks` ; c'est le premier endroit à regarder.
+Conséquence : **les points 1 et 2 du parcours n'ont été validés que par `tsc` et relecture.**
+
+> **Le piège de mesure du 10/08 s'est confirmé autrement.** Le benchmark « 4,8 s » de cette
+> date portait sur **une recherche isolée à froid**. Personne n'avait mesuré **deux
+> recherches d'affilée**, qui est le comportement réel. Le chiffre était juste, le scénario
+> faux — et c'est ce qui a laissé passer le facteur 2 de `handleAnalyze` pendant six jours.
+> Toujours mesurer la répétition, pas seulement le premier coup.
+
+**Le plan restant, décidé avec Victor** (priorités : fluidité + tenir la montée en charge) :
+slice 2 = **annulation de bout en bout** (`AbortSignal`, avec un traitement à part pour le
+chemin d'écriture de `/suivi`) ; slice 3 = **états de chargement honnêtes** ; slice 4 =
+**régulateur de débit**, à faire au moment du déploiement car il lui faut un état partagé
+(un seau à jetons en mémoire est faux dès qu'il y a plusieurs instances serverless).
+**Le fix « supprimer le double import » a été abandonné volontairement** : le cache le rend
+quasi gratuit, et les deux appels en parallèle font s'afficher le winrate SoloQ sans
+attendre l'analyse ranked — on ne sacrifie pas ça pour des appels qu'on ne paie plus.
+
+### 2026-08-13 (2) — Clé Riot expirée : le rang **et** les recommandations tombent ensemble
+
+**Premier vrai test de Victor dans l'app** (enfin — après trois sessions de code non vérifié).
+Symptôme rapporté sur `/suivi` : plus d'emblème, plus de palier, plus de LP, et plus de bloc
+« Sur quoi progresser ». Le reste du cockpit s'affichait normalement, games et couleurs
+comprises.
+
+**Une seule cause pour les deux symptômes : la dev key avait expiré.** Confirmé en une
+requête, sans toucher au code :
+
+```
+{"error":"Riot API 401 ... {\"message\":\"Unknown apikey\",\"status_code\":401}"}
+```
+
+**L'enchaînement, qui est le vrai truc à retenir.** Une clé morte ne fait pas que retirer
+le badge de rang : `res.ok` est faux → `currentRank` reste `null` → le palier de référence
+retombe sur le **`former_rank` saisi à l'onboarding**
+([suivi/page.tsx:152](app/suivi/page.tsx#L152)). Si ce `former_rank` est un palier sans
+contenu écrit, les recommandations disparaissent **aussi**, sans le moindre message.
+Deux symptômes très différents, une seule panne. À se rappeler avant de chercher deux bugs.
+
+Vraie valeur une fois la nouvelle clé posée dans `.env.local` : `PLATINUM I, 22 LP`. Victor
+est donc **platine**, pas diamant — le contenu platine existe, tout est revenu. À noter :
+**Next relit `.env.local` tout seul**, aucun redémarrage du serveur n'a été nécessaire.
+
+**Décision de Victor sur les paliers/rôles sans contenu** (prise ce jour, « pour le
+moment ») : plutôt que de retomber sur le générique, on **emprunte** le contenu écrit le
+plus proche — émeraude pour diamant → challenger, et le mid du même palier pour les quatre
+autres rôles. Mais **les recommandations ne s'empruntent pas** : le bloc affiche
+« Pas encore développé pour ton palier et ton rôle ». Les questions d'erreurs et la
+surbrillance, elles, sont bien servies.
+
+Conséquence visible : le bloc « Sur quoi progresser » **ne disparaît plus jamais**. Avant,
+`{!content.inDevelopment && ...}` le faisait s'évanouir sans explication sur `/` et
+`/suivi` ; il est maintenant toujours rendu, avec l'avertissement à la place du contenu
+(c'est déjà ce que faisait `/onboarding`). Mécanique : une table `CONTENT_TIER` dans
+[mid.ts](lib/content/mid.ts), et `getContent` renvoie `{ ...written, inDevelopment: true }`
+quand le contenu est emprunté — le contenu écrit n'est jamais muté au passage.
+
+**Réserve à surveiller :** les questions empruntées sont rédigées pour le mid. Elles sont
+globalement neutres (« Es-tu mort en lane ? Pourquoi ? »), mais les `focusPoints` d'où elles
+viennent parlent de 2v2 mid-jungle et d'aram mid. Si un joueur support trouve ça à côté de
+la plaque, c'est le premier endroit où regarder.
+
+**Vérifications :** `tsc --noEmit` OK, et **41 assertions** sur le vrai `getContent` exécuté
+via Node 24 (les 6 paliers mid intacts, l'emprunt d'émeraude pour les 4 paliers du haut,
+les 4 rôles, `unranked` qui retombe bien sur le générique, et la non-mutation du contenu
+écrit) — toutes vertes. `npm run build` **pas encore lancé** : le serveur de dev tournait,
+on ne fait pas les deux en même temps vu l'historique de `.next`.
+
+### 2026-08-13 (1) — « Lance l'app » figeait le PC : cache Turbopack corrompu
+
+Trois crashs machine sur l'instruction « lance l'app » les 12 et 13/08, dont **un pendant
+l'enquête elle-même**. Deux `Kernel-Power 41` confirmés dans le journal Windows (15h32 et
+16h19). Aucune ligne de code n'était en cause : l'arbre de travail est resté propre.
+
+**Le symptôme, mesuré.** Le démarrage du serveur est sain (2 process, 543 Mo, port ouvert
+en ~9 s). C'est la **compilation de la première page** qui déclenche tout : le serveur
+lance en boucle des process enfants « pont PostCSS » de Turbopack
+(`.next/dev/build/<hash>.js <port>`), **un par port éphémère**, parcourant toute la plage
+dynamique Windows (65474→65533 puis reprise à 49152), sans jamais en tuer aucun.
+**2 → 31 → 75 → 131 process / 1709 threads / 7,3 Go en 12 secondes.** Le process principal
+de `next dev`, lui, reste à ~600 Mo : toute la mémoire est dans les enfants.
+
+**La cause : le cache persistant de Turbopack dans `.next/dev/cache`.** Le fichier
+`.next/dev/trace` l'annonçait déjà — `turbopack-compaction` à **85 secondes**,
+`turbopack-persistence` avec `reason: "initial snapshot timeout"` sur 4096 tâches.
+
+**Le remède : supprimer `.next`.** Vérifié à froid *et* à chaud une fois le cache
+reconstruit : 3 process, `GET / → 200` en 7 s, stable. **Si ça revient un jour, supprimer
+`.next` est le premier réflexe** — c'est la seule chose qui a marché.
+
+**Fausses pistes écartées par l'expérience, à ne pas refaire :** le code du projet (aucun
+`spawn`), `next.config.ts` (vide), les hooks Claude (aucun), `NODE_OPTIONS`/`.npmrc`
+(inexistants), le pare-feu (node.exe explicitement autorisé), le loopback TCP (testé entre
+deux process, fonctionne), Tailwind et son scan de sources (`source(none)` + `@source`
+n'a rien changé), et la config PostCSS en ESM vs CommonJS (idem). Décisif : **une config
+PostCSS vide de tout plugin explosait aussi** — ce n'était donc pas Tailwind.
+
+**Comment tester ce genre de chose sans faire tomber la machine.** Un watchdog par sondage
+**ne protège pas** : la bombe passe de 36 à 150 process en 4 secondes, un sondage à 900 ms
+arrive trop tard. Il faut une limite imposée par le noyau — un **Job Object Windows** avec
+`ActiveProcessLimit` et `JobMemoryLimit` : Windows refuse alors la création du process
+n+1, sans course possible.
+
+> **Piège qui a coûté un quasi-crash :** en PowerShell,
+> `$info.BasicLimitInformation.LimitFlags = ...` **n'écrit rien** — on modifie une *copie*
+> de la sous-structure valeur, aussitôt jetée. `SetInformationJobObject` renvoie alors
+> `True` en n'ayant posé **aucune** limite (relu du noyau : `LimitFlags = 0x0`). Il faut
+> réaffecter la sous-structure entière (`$info.BasicLimitInformation = $b`) **et relire
+> les limites via `QueryInformationJobObject` avant de démarrer quoi que ce soit**. La
+> valeur de retour ne prouve rien.
+
+À noter : Turbopack veut **plus de 1,5 Go**. Le plafonner en dessous provoque des
+`memory allocation of N bytes failed` côté Rust qui ne sont pas des bugs de l'application.
 
 ### 2026-08-11 — Seuils par palier, morts pondérées, bandeaux sur les deux pages
 
@@ -344,23 +588,36 @@ Classé par ce que ça rapporte, pas par difficulté.
 
 ### À vérifier en tout premier (rien n'a encore été testé en vrai)
 
-Ni la session du 2026-08-10 ni celle du 2026-08-11 n'ont été ouvertes dans l'app par
-Victor. **Commencer par lui demander où ça en est, avant d'entamer autre chose.**
+**Le cockpit a enfin été ouvert en vrai le 2026-08-13** (capture d'écran à l'appui). Ce qui
+suit est donc à jour ; ce qui reste coché « à faire » ne l'est vraiment pas.
 
-Du 2026-08-11 :
+Vu et validé sur la capture du 2026-08-13 :
 
-- [ ] **Les couleurs correspondent aux seuils voulus** sur de vraies games, et le clignotement
-      des stats prioritaires est agréable et pas épileptique (1,4 s par cycle — à ajuster
-      dans [globals.css](app/globals.css) si c'est trop rapide ou trop lent).
-- [ ] **Les bandeaux de gauche apparaissent sur `/suivi`**, dans l'ordre vert → jaune → rouge.
-- [ ] **Les morts en pointillé** sur les games de plus de 34 min, avec l'infobulle au survol.
-      L'infobulle est le `title` natif du navigateur : elle met ~1 s à apparaître. Si Victor
-      la trouve trop discrète, la remplacer par une vraie bulle en CSS.
+- [x] ~~Le cockpit charge, un seul compte Riot~~ — plus de mélange, uniquement
+      `Chopin Opus 52#1849`.
+- [x] ~~Le CS/min après 20 min affiche des valeurs~~ — 7.6, 5.1, 7.1 sur les trois premières
+      games. Le « — » définitif appartient au passé.
+- [x] ~~Les couleurs s'appliquent~~ — vert / jaune / rouge présents sur les trois stats.
+- [x] ~~Les bandeaux de gauche apparaissent sur `/suivi`~~ — « Peut mieux farm en lane » et
+      « Peux mieux side lane ». *L'ordre vert → jaune → rouge n'est pas vérifié pour autant :
+      la capture ne montrait que des bandeaux jaunes.*
+- [x] ~~Les morts en pointillé~~ — visibles sur la game de 34:50 (2.3 souligné en pointillé).
+      L'infobulle au survol reste à confirmer.
 
-Du 2026-08-10 :
+Reste vraiment à vérifier :
 
-- [ ] **Le cockpit charge**, n'affiche plus qu'un seul compte Riot (fin du mélange
-      cartem/chopin), et le **CS/min après 20 min affiche enfin des valeurs**.
+- [ ] **L'accueil `/` et l'écran de résultat de l'analyse gratuite** après la refonte du
+      2026-08-16 (bandeaux bleus + disposition reprise de `/suivi`). **Non vérifiés
+      visuellement** : Chrome headless reste bloqué sur `LoadingDots` sur `/`, alors que la
+      page marche dans un vrai navigateur (voir le journal). `tsc` passe, le reste est de la
+      relecture. **20 secondes d'œil suffisent à lever le doute.**
+- [ ] **`/suivi` affiche bien les 20 games ET les notes** après le passage au cache partagé.
+      L'écriture dans `games` a changé (toutes les lignes affichées, plus seulement les
+      nouvelles) et ce chemin exige une session connectée : jamais exécuté en test. Le
+      bandeau et les recommandations, eux, sont confirmés par capture du 2026-08-16.
+- [ ] **Le clignotement des stats prioritaires** est agréable et pas épileptique (1,4 s par
+      cycle — à ajuster dans [globals.css](app/globals.css)). Non vérifiable sur une capture,
+      et invisible en platine dont `highlightStats` est vide : il faut un compte iron → gold.
 - [ ] **Les notes écrites à la main survivent au réimport.** C'est le point le plus
       sensible : l'upsert ne liste pas `error_lane` / `error_macro` / `error_fight` /
       `summary`, elles devraient donc être préservées — vérifié par le raisonnement, jamais
@@ -383,12 +640,16 @@ Du 2026-08-10 :
 
 ### Contenu (le gros morceau)
 
-- [ ] **4 rôles sur 5 n'ont aucun contenu** : top, jungle, adc, support tombent sur le
-      fallback ([lib/content/mid.ts](lib/content/mid.ts)). Le squelette est prêt —
-      il suffit d'un `Partial<Record<Tier, TierContent>>` par rôle. C'est de la rédaction,
-      pas du code. Moins urgent depuis le 2026-08-11 : ces rôles ont désormais des
-      couleurs, il ne leur manque que le texte et la surbrillance.
-- [ ] **4 paliers mid manquants** : diamond, master, grandmaster, challenger.
+Rendu **beaucoup moins urgent** par l'emprunt décidé le 2026-08-13 : plus personne ne tombe
+sur du générique, et seules les recommandations manquent à l'appel. C'est de la rédaction,
+pas du code.
+
+- [ ] **4 rôles sur 5 n'ont aucun contenu propre** : top, jungle, adc, support empruntent le
+      mid ([lib/content/mid.ts](lib/content/mid.ts)). Le squelette est prêt — il suffit d'un
+      `Partial<Record<Tier, TierContent>>` par rôle, et de brancher `getContent` dessus
+      **avant** de retomber sur le mid.
+- [ ] **4 paliers mid manquants** : diamond, master, grandmaster, challenger — ils empruntent
+      émeraude. Victor est platine en août 2026, donc ça ne le concerne pas encore.
 
 ### Code
 
@@ -406,6 +667,35 @@ Du 2026-08-10 :
       plus dans six mois.
 - [ ] **Spinner de recherche manquant** sur le flux principal. `LoadingDots` existe déjà
       dans [app/page.tsx](app/page.tsx), il ne sert que au panneau « Analyse ».
+      *Repris par la slice 3 ci-dessous.*
+
+#### Les slices convenues le 2026-08-16 (suite du cache partagé)
+
+Priorités posées par Victor : **fluidité** d'abord, et **tenir la montée en charge**.
+
+- [ ] **Slice 2 — annulation de bout en bout.** Propager `request.signal` de la route
+      jusqu'aux `fetch` de [lib/riot/client.ts](lib/riot/client.ts), + un `AbortController`
+      côté client au démontage et à chaque nouvelle recherche. Aujourd'hui, fermer l'onglet
+      n'arrête que l'attente du navigateur : le serveur continue de dérouler ses appels et
+      de brûler le quota pour un résultat que personne ne lira — **la navigation est un
+      amplificateur de charge**. *Piège identifié :* la politique doit différer selon le
+      chemin — sur `/suivi` l'import **écrit** aussi la réparation en base, donc l'annuler
+      ferait recommencer la réparation à chaque visite. Et StrictMode de React 19
+      double-invoque les effets en dev : la première requête sera annulée aussitôt, ce qui
+      ressemble à un bug sans en être un.
+- [ ] **Slice 3 — états de chargement honnêtes.** Le « ... » ne distingue pas « 4 s, tout va
+      bien » de « étranglé, ce sera 3 minutes ». Afficher un état explicite, et un message
+      franc sur 429 au lieu du silence.
+- [ ] **Slice 4 — régulateur de débit**, à faire **au moment du déploiement**. Un seau à
+      jetons au niveau module est **faux dès qu'il y a plusieurs instances serverless**
+      (N instances = N seaux = N × la limite) : il lui faut un état partagé. À noter aussi
+      qu'il ne crée pas de budget — il rend l'attente ordonnée, pas plus courte. Il ne
+      devient utile qu'après la baisse du volume d'appels, donc maintenant.
+- [x] ~~Supprimer le double import de `handleAnalyze`~~ — **abandonné volontairement le
+      2026-08-16**. Le cache rend le second appel quasi gratuit, et les deux appels en
+      parallèle font s'afficher le winrate SoloQ sans attendre l'analyse ranked. Dériver la
+      SoloQ depuis `ranked` aurait réduit l'échantillon de façon **variable selon le
+      joueur** — une régression statistique invisible en test.
 
 ### Infra / sécurité
 
@@ -438,6 +728,24 @@ Les décisions qu'il ne faut pas défaire sans raison — elles ont chacune coû
   en sont le cas : on montre le rythme brut, on colore sur le rythme pondéré. Quand les
   deux divergent, l'écart doit être **visible et explicable** à l'utilisateur (d'où le
   pointillé + l'infobulle), jamais silencieux.
+- **Un contenu manquant s'emprunte, une recommandation ne s'emprunte pas.** Questions
+  d'erreurs et surbrillance sont reprises du contenu écrit le plus proche (émeraude pour
+  les paliers au-dessus, le mid pour les autres rôles) ; les recommandations, elles,
+  affichent franchement « pas encore développé ». Même esprit que les couleurs : on préfère
+  **dire qu'on ne sait pas** plutôt que de dire quelque chose d'à peu près juste. Corollaire :
+  le bloc « Sur quoi progresser » est **toujours rendu**, jamais escamoté.
+- **Une donnée publique et immuable ne se cache pas dans une table qui appartient à un
+  user.** Les faits d'une partie terminée sont les mêmes pour tout le monde : ils vivent
+  dans `match_facts`, clé `(riot_match_id, puuid)`, sans `user_id`. `games` reste la vue
+  personnelle (les notes, l'historique du joueur). Tant que le cache vivait dans `games`,
+  l'analyse gratuite — le parcours de **chaque visiteur** — était le seul chemin sans cache.
+  Corollaire de sécurité : cette table n'a **aucune policy RLS** et n'est écrite que par la
+  clé `service_role`, parce qu'aucune policy SQL ne peut vérifier qu'une ligne vient bien
+  de Riot.
+- **Tout cache se valide par comparaison octet-à-octet chaud / froid.** Un cache dont la
+  sortie diffère de la source, même sur un détail de format, n'est plus transparent — et
+  l'écart ne se voit dans aucun log. C'est ce test qui a attrapé le `+00:00` / `Z` du
+  2026-08-16.
 - **Migrations non destructives uniquement.** On ajoute des colonnes, on n'en supprime
   jamais. Le SQL se colle à la main dans l'éditeur Supabase.
 - **La clé Riot ne quitte jamais le serveur**, et la région est EUW en dur.

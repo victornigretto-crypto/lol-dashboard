@@ -20,6 +20,7 @@ import {
   totalCs,
   QUEUE_SOLOQ,
 } from "@/lib/riot/transform";
+import { readMatchFacts, writeMatchFacts, type MatchFacts } from "@/lib/riot/matchCache";
 
 const TARGET_COUNT = 20;
 const PAGE_SIZE = 20;
@@ -34,56 +35,29 @@ const LATE_DEATHS_WINDOW_MIN = 5;
 
 type Filter = "soloq" | "ranked" | "all";
 
-type Row = {
-  riot_match_id: string;
-  lane: string;
-  champion: string;
-  matchup: string;
-  result: string;
-  cs20: number;
-  deaths10: number;
-  queue: string;
-  played_at: string;
-  // Nullable côté base (colonnes ajoutées en Slice 3), mais une ligne du cache
-  // à qui il en manque une est retéléchargée plutôt que resservie : cf.
-  // `isComplete`. Toute Row rendue ici les a donc réellement.
-  cs_final: number | null;
-  game_duration_seconds: number | null;
-  // Faits bruts derrière la couleur des morts : le total, et combien sont
-  // survenues dans les 5 dernières minutes. `deaths10` reste le rythme
-  // affiché ; la pondération se fait à la lecture (lib/stats).
-  deaths: number | null;
-  deaths_last5: number | null;
-};
+// La forme des lignes renvoyées au navigateur est celle du cache partagé :
+// une seule définition (cf. lib/riot/matchCache.ts), donc aucune divergence
+// possible entre ce qu'on cache et ce qu'on affiche.
+type Row = MatchFacts;
 
 type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
 
-// Une ligne en cache n'est réutilisable que si elle est COMPLÈTE. Sans
-// `cs_final` ni durée, `csMetrics` ne peut pas calculer le CS/min après 20 min
-// et affiche "—" ; comme rien d'autre ne déclenche jamais de réimport, ce "—"
-// serait définitif pour toute game importée avant la Slice 3. La traiter comme
-// absente du cache la fait retélécharger une fois, puis se réparer en base.
-function isComplete(row: Partial<Row> & { puuid?: string | null }): boolean {
-  return Boolean(
-    row.riot_match_id &&
-      row.queue &&
-      row.played_at &&
-      row.puuid &&
-      row.cs_final !== null &&
-      row.game_duration_seconds !== null &&
-      row.deaths !== null &&
-      row.deaths_last5 !== null
-  );
-}
-
 // Construit les lignes d'affichage pour une liste de matchIds, en réutilisant
-// tout ce qui est déjà en base (une game finie ne change jamais) et en
-// n'appelant l'API Riot que pour les matchs réellement inconnus, en parallèle.
+// le cache partagé (une game finie ne change jamais) et en n'appelant l'API
+// Riot que pour les matchs réellement inconnus, en parallèle.
 //
-// `persist` doit être false quand le puuid analysé n'est pas le compte Riot
-// lié à ce user (cf. garde-fou anti-pollution dans POST) : on saute alors le
-// cache ET l'upsert, pour ne jamais lire ni écrire dans les games d'un autre
-// compte. L'aperçu reste éphémère, jamais stocké.
+// Le cache est lu par (riot_match_id, puuid) dans `match_facts`, PAS dans
+// `games` : les faits d'une partie terminée sont publics et identiques pour
+// tout le monde, alors que `games` est la vue personnelle d'un user. Lire dans
+// `games` réservait donc le cache aux seuls utilisateurs connectés analysant
+// leur propre compte — c'est-à-dire que l'analyse gratuite, le parcours de
+// chaque visiteur, ne cachait rien du tout et retéléchargeait 20 parties à
+// chaque fois.
+//
+// `persist` reste l'invariant anti-pollution et ne gouverne plus que `games` :
+// on n'écrit dans les games d'un user que si le puuid analysé est bien son
+// compte lié. Le cache partagé, lui, n'appartient à personne — l'alimenter
+// depuis l'analyse d'un inconnu est sans risque et profite à tous.
 async function buildRowsForMatchIds(
   matchIds: string[],
   puuid: string,
@@ -93,25 +67,7 @@ async function buildRowsForMatchIds(
 ): Promise<Row[]> {
   if (matchIds.length === 0) return [];
 
-  const cacheMap = new Map<string, Row>();
-
-  if (persist) {
-    // Le cache se lit par (user_id, puuid) et pas par user_id seul : un même
-    // user peut avoir relié plusieurs comptes Riot au fil du temps, et servir
-    // la ligne d'un autre compte donnerait les stats d'un autre joueur.
-    const { data: cached } = await supabase
-      .from("games")
-      .select(
-        "riot_match_id, lane, champion, matchup, result, cs20, deaths10, queue, played_at, cs_final, game_duration_seconds, deaths, deaths_last5, puuid"
-      )
-      .eq("user_id", userId)
-      .eq("puuid", puuid)
-      .in("riot_match_id", matchIds);
-
-    for (const row of cached ?? []) {
-      if (isComplete(row)) cacheMap.set(row.riot_match_id as string, row as Row);
-    }
-  }
+  const cacheMap = await readMatchFacts(matchIds, puuid);
 
   const missingIds = matchIds.filter((id) => !cacheMap.has(id));
 
@@ -151,26 +107,42 @@ async function buildRowsForMatchIds(
 
   const newRows = freshRows.filter((row): row is Row => row !== null);
 
-  if (persist && newRows.length > 0) {
+  for (const row of newRows) cacheMap.set(row.riot_match_id, row);
+
+  const rows = matchIds.map((id) => cacheMap.get(id)).filter((row): row is Row => row !== undefined);
+
+  await Promise.all([
+    // Le cache partagé ne reçoit que ce qui vient d'être téléchargé : le reste
+    // en sort déjà.
+    writeMatchFacts(newRows, puuid),
+
+    // `games`, lui, reçoit TOUTES les lignes affichées et pas seulement les
+    // nouvelles. C'est la conséquence directe du cache partagé : une partie
+    // servie depuis `match_facts` n'est jamais retéléchargée, donc si on
+    // n'écrivait que `newRows`, elle n'atterrirait jamais dans les games du
+    // joueur — et /suivi, qui lit `games` en direct pour les notes, afficherait
+    // un cockpit vide. L'upsert est idempotent : le recoût est nul.
+    //
     // `ignoreDuplicates: false` : une ligne déjà présente doit être MISE À JOUR,
     // sinon une game importée avant la Slice 3 garderait ses colonnes nulles à
     // vie. Seules les colonnes du payload sont réécrites — les trois listes
     // d'erreurs et le résumé, saisis par le joueur dans /suivi, n'y sont pas et
     // sont donc préservés.
-    const { error } = await supabase
-      .from("games")
-      .upsert(
-        newRows.map((row) => ({ ...row, user_id: userId, puuid })),
-        { onConflict: "user_id,riot_match_id", ignoreDuplicates: false }
-      );
-    if (error) {
-      console.error("Sauvegarde de l'import impossible", error);
-    }
-  }
+    (async () => {
+      if (!persist || rows.length === 0) return;
+      const { error } = await supabase
+        .from("games")
+        .upsert(
+          rows.map((row) => ({ ...row, user_id: userId, puuid })),
+          { onConflict: "user_id,riot_match_id", ignoreDuplicates: false }
+        );
+      if (error) {
+        console.error("Sauvegarde de l'import impossible", error);
+      }
+    })(),
+  ]);
 
-  for (const row of newRows) cacheMap.set(row.riot_match_id, row);
-
-  return matchIds.map((id) => cacheMap.get(id)).filter((row): row is Row => row !== undefined);
+  return rows;
 }
 
 // Rassemble les lignes à afficher selon le filtre, en ne demandant à Riot que
