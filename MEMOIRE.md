@@ -187,10 +187,20 @@ navigateur, et le rang réellement affiché dans le cockpit.
 > rank. **La clé restée dans `.env.local` est toujours l'ancienne, expirée** : inoffensive
 > aujourd'hui, piège le jour où la base sera vidée.
 
-**Reste ouvert** — au prochain `vercel --prod`, Vercel **recréera**
-`gg-dashboard-nigretto.vercel.app` (nom du projet + scope) ; protégée par le SSO, donc non
-publique. Les *Redirect URLs* de Supabase Auth **n'ont pas été touchées** alors que les deux
-anciennes URLs sont mortes.
+**Reste ouvert** — les *Redirect URLs* de Supabase Auth **n'ont pas été touchées**, et
+`lol-dashboard-three.vercel.app` sert **encore** le site (voir « Reste à faire »).
+
+> ### Un alias supprimé revient au déploiement suivant
+> Supprimer un **alias** (`vercel alias remove`) ne supprime pas l'**enregistrement du
+> domaine sur le projet** : au déploiement de production suivant, Vercel ré-aliase tous les
+> domaines du projet et les URLs « supprimées » réapparaissent. C'est arrivé aux deux, une
+> heure après leur suppression. La vraie suppression se fait dans **Settings → Domains** du
+> projet ; le CLI n'expose rien pour ça (`vercel domains remove` ne gère que les domaines
+> d'équipe, et un sous-domaine `.vercel.app` n'en est pas un).
+> **Cas à part : `<projet>-<scope>.vercel.app`.** Vercel le réattribue à chaque déploiement
+> de production, quoi qu'on fasse. Une fois retiré des domaines du projet il retombe
+> simplement en **302 vers le SSO** — présent mais non public, et c'est le mieux qu'on
+> puisse obtenir. Inutile d'essayer de le supprimer, il reviendra.
 
 
 ### 2026-08-17 (3) — Bouton « Rapporter un problème » sur tous les écrans
@@ -445,6 +455,10 @@ Priorités posées par Victor : **fluidité** d'abord, et **tenir la montée en 
 - [ ] **`/api/riot/import` est publique et non rate-limitée**
       ([lib/supabase/proxy.ts:55](lib/supabase/proxy.ts#L55)). Nécessaire pour l'analyse
       gratuite, mais n'importe qui peut cramer le quota Riot.
+- [ ] **`lol-dashboard-three.vercel.app` sert encore le site** (HTTP 200). Elle est toujours
+      enregistrée comme domaine du projet `gg-dashboard` : à retirer dans **Settings →
+      Domains** du dashboard Vercel. Le retrait par l'API REST a été tenté puis abandonné —
+      il demande le token Vercel, dont la lecture est bloquée côté Claude Code.
 - [ ] **Redirect URLs de Supabase Auth jamais revues après le renommage Vercel** du
       2026-08-17 : `lol-dashboard-three` et `lol-dashboard-nigretto` sont **mortes**. Si l'une
       d'elles y est encore déclarée, la connexion en production casse. Se règle dans le
