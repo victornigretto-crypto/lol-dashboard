@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { performanceBanners } from "@/lib/banners";
+import { sampleForAnalysis } from "@/lib/sample";
 import {
   FALLBACK_CONTENT,
   getContent,
@@ -302,10 +303,19 @@ export default function SuiviPage() {
   };
 
   const parsedRiotId = riotId ? parseRiotId(riotId) : null;
-  // Mêmes bandeaux que sur l'analyse gratuite, calculés sur les games du
-  // cockpit. Ils apparaissent donc en même temps que le tableau, une fois
-  // l'import terminé.
-  const banners = performanceBanners(games, thresholds);
+  // Mêmes bandeaux que sur l'analyse gratuite, et surtout MÊME échantillon :
+  // les 20 dernières parties depuis le plancher, jugées sur le rôle principal
+  // déclaré au profil (cf. lib/sample et performanceBanners).
+  //
+  // Le TABLEAU, lui, continue d'afficher toutes les games sans exception : il
+  // porte les notes écrites à la main, et en masquer une ferait disparaître du
+  // travail du joueur. Restreindre l'échantillon d'analyse ne doit jamais
+  // restreindre son cahier.
+  const banners = performanceBanners(
+    sampleForAnalysis(games),
+    thresholds,
+    roleFromLane(primaryRole)
+  );
 
   return (
     <main className="min-h-screen bg-slate-950 p-4 text-slate-100">

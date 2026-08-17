@@ -68,6 +68,53 @@ navigateur, et Resend accepter un envoi ne prouve pas la **réception** en boît
 > bords haut et bas (44-74), 8 px d'écart, et ne chevauchent ni l'email, ni la carte, ni
 > l'emblème.
 
+### 2026-08-17 (4) — La clé **Riot** se change depuis l'app, par le seul compte admin
+
+**Contexte** — la dev key Riot expire toutes les 24 h ; la remplacer imposait d'éditer
+`.env.local` sur la machine qui sert l'app. *(Premier jet visait la clé Resend : malentendu,
+corrigé le jour même. La clé Resend reste dans l'environnement, elle n'expire pas.)*
+
+**Changé**
+- **Une variable d'environnement ne se réécrit pas à l'exécution** (et en serverless le
+  disque est en lecture seule) : la clé déménage donc **en base**. Nouvelle table
+  `app_settings` (clé/valeur), migration
+  [20260817_app_settings.sql](supabase/migrations/20260817_app_settings.sql) —
+  **à lancer par Victor**, rien ne marche avant.
+- `lib/settings.ts` : **la base a la priorité, `RIOT_API_KEY` reste le filet de secours.**
+  `lib/riot/client.ts` appelle `cleRiot()` au lieu de lire `process.env`.
+  **Cache mémoire de 30 s obligatoire** : un seul import déclenche ~43 `riotFetch`, donc
+  autant de lectures de la même ligne sans lui. L'écriture vide le cache du process.
+- `app/api/admin/riot-key` : `GET` rend l'état **masqué**, `POST` remplace la clé (format
+  `RGAPI-` + UUID exigé). Contrôle d'accès **côté serveur**, sur l'email de la session.
+- `AdminKeyButton` dans la rangée haut-droite de `/suivi`, aux mêmes classes que ses deux
+  voisins. Il ne rend rien pour les autres comptes.
+- L'admin est **en dur** dans [lib/admin.ts](lib/admin.ts) : le changer exige un commit,
+  donc laisse une trace. Une liste en base ou en env se modifie sans bruit.
+
+**Vérifié** — `tsc --noEmit`, `npm run test` (109), `npm run build` (15 routes) passent.
+Appel direct non authentifié de `/api/admin/riot-key` : **307 vers `/login`**, en `GET`
+comme en `POST`, rien écrit. **Le repli est prouvé en vrai** : la table n'existant pas
+encore, `[settings]` a crié dans les logs et l'app a bien utilisé `RIOT_API_KEY`.
+**Non vérifié en conditions réelles** : le refus 403 d'un compte connecté **non**
+administrateur (il faudrait un second compte), et l'écran jamais ouvert dans un navigateur.
+
+> **Clé Riot expirée pour la 4ᵉ fois**, constatée ce jour (`401 Unknown apikey`). C'est
+> exactement ce que cet écran sert à réparer sans toucher au serveur.
+
+**Reste ouvert** — le bouton n'apparaît que pour l'email **exactement**
+`grosgalio@gmail.com` ; les captures de la session montraient `galiogros@gmail.com` puis
+`paul.gentil2240@gmail.com`. **Si le compte de l'app n'a pas cette adresse, le bouton
+reste invisible** — c'est la première chose à vérifier.
+
+> ### Le secret est en base, et ça a un prix
+> `app_settings` n'a **aucune policy RLS**, comme `match_facts` : seule la clé
+> `service_role` y accède. Ici ce n'est pas du confort — la table contient un secret en
+> clair. Une policy de lecture, même restreinte à un compte, l'exposerait à l'API REST
+> donc au navigateur. **La clé ne ressort jamais de l'API**, seulement masquée
+> (`re_Dfz••••••••oRBB`) : on la remplace, on ne la relit pas.
+> Contrepartie assumée : elle se retrouve **en clair dans toute sauvegarde de la base**.
+> Une clé Resend compromise se révoque sur resend.com, elle ne se répare pas.
+
 ### 2026-08-17 (2) — Quatre bandes de couleur au lieu de trois
 
 **Contexte** — Victor a recalibré toute la grille et ajouté un **vert pâle** entre le jaune

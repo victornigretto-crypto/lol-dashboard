@@ -95,6 +95,17 @@ une fois le dépôt connecté** : son silence ne prouve rien, ne pas s'y fier.
 > comportement d'avant, avec un avertissement dans les logs.
 > **Ne jamais préfixer cette clé `NEXT_PUBLIC_`** : elle contourne RLS.
 
+> ### Ce qui entre dans l'analyse, depuis le 2026-08-18
+> Une seule porte : `sampleForAnalysis` dans [lib/sample.ts](lib/sample.ts). **Les 20
+> dernières parties**, jamais avant le **18/01/2026**, et **rien de moins de 5 minutes** (les
+> remakes sont retirés avant le découpage, ils ne prennent aucune place). La règle « moins de
+> 2 mois » n'existe plus.
+> Les bandeaux de **stats** (farm avant/après 20, morts) ne jugent que le **rôle principal**.
+> « Trop de rôles » et le pool de champions voient **tout l'échantillon**, et seulement la
+> SoloQ.
+> **Le tableau de `/suivi` n'est PAS filtré** : il porte les notes du joueur, en masquer une
+> ferait disparaître son travail.
+
 > **`npm run dev` refonctionne** depuis le 2026-08-13. Il figeait la machine à cause d'un
 > cache Turbopack corrompu (voir le journal) ; `.next` a été supprimé et le serveur sert
 > `/` en ~7 s, à froid comme à chaud. Aucun code n'a été modifié pour ça.
@@ -151,6 +162,46 @@ même sans contenu écrit.
 ---
 
 ## Journal des sessions
+
+### 2026-08-18 — L'échantillon d'analyse change de règle : date, rôle, remakes
+
+**Contexte** — trois demandes de Victor sur ce qui entre dans les stats, plus le message
+d'erreur de la clé Riot.
+
+**Changé**
+- **[lib/sample.ts](lib/sample.ts), nouveau** : le point de passage UNIQUE de tout ce qui est
+  analysé. La règle « moins de 2 mois » est **supprimée** — elle jugeait un joueur peu actif
+  sur deux parties. Désormais : **les 20 dernières, plancher dur au 18/01/2026**, et les
+  parties de **moins de 5 minutes écartées** (remakes). Les remakes sont retirés AVANT le
+  découpage à 20 : ils ne consomment aucune place.
+- **Filtre par rôle principal** dans `performanceBanners` : farm avant/après 20 et morts ne
+  jugent que les parties du rôle principal. **« Trop de rôles » et le pool de champions
+  restent sur tout l'échantillon** — le premier compte justement les rôles, le second a besoin
+  des autres rôles pour désigner le plus chargé.
+- **`/`** : le repli « plus de 2 mois » disparaît, la liste affiche exactement ce qui est
+  analysé. **`/suivi`** : bandeaux sur l'échantillon, **mais le tableau garde toutes les
+  games** — il porte les notes écrites à la main.
+- **[lib/riot/client.ts](lib/riot/client.ts)** : un 401/403 de Riot rend désormais
+  « Expiration de la clef API : Contacter Gros Galio pour lui demander de la refresh » au lieu
+  du JSON brut. Le détail technique part dans les logs serveur.
+
+**Vérifié** — `tsc --noEmit`, **128 tests** (15 nouveaux), `npm run build`. Le chemin d'erreur
+401/403 est couvert par des tests qui simulent les réponses de Riot ; aucune vraie expiration
+n'a été déclenchée. **Non vérifié en conditions réelles** : `/suivi`, qui exige une session.
+
+> ### Deux diagnostics faits sur données réelles, pas au raisonnement
+> **Dickapryo#EUW** — Victor pensait que le filtre par rôle avait tué « trop de rôles » et
+> « trop de champions ». Preuve du contraire : `performanceBanners(role=null)`, donc SANS
+> filtre, rend exactement la même liste. Ils sont muets par leurs propres seuils — 3 rôles
+> (il en faut 4) et pool de 3 en bronze (il en faut plus de 3).
+> **Chopin Opus 47#Op47** — le « Peux mieux side lane » à 6,2 CS/min est juste : son farm
+> avant 20 est bon partout, mais il prend 59 CS en 17 minutes sur une game de 37 min. Les
+> games de moins de 20 minutes rendent `null` et ne pèsent pas sur cette moyenne.
+
+**Reste ouvert** — sur un compte comme Dickapryo, faut-il compter les champions tous rôles
+confondus, descendre le seuil de rôles à 3, ou inclure Flex et normales dans ces deux
+bandeaux ? Question posée, non tranchée.
+
 
 ### 2026-08-17 (6) — Le signalement se scinde : les bugs sur un tableur, les idées par email
 
@@ -233,53 +284,6 @@ navigateur, et le rang réellement affiché dans le cockpit.
 > simplement en **302 vers le SSO** — présent mais non public, et c'est le mieux qu'on
 > puisse obtenir. Inutile d'essayer de le supprimer, il reviendra.
 
-
-### 2026-08-17 (4) — La clé **Riot** se change depuis l'app, par le seul compte admin
-
-**Contexte** — la dev key Riot expire toutes les 24 h ; la remplacer imposait d'éditer
-`.env.local` sur la machine qui sert l'app. *(Premier jet visait la clé Resend : malentendu,
-corrigé le jour même. La clé Resend reste dans l'environnement, elle n'expire pas.)*
-
-**Changé**
-- **Une variable d'environnement ne se réécrit pas à l'exécution** (et en serverless le
-  disque est en lecture seule) : la clé déménage donc **en base**. Nouvelle table
-  `app_settings` (clé/valeur), migration
-  [20260817_app_settings.sql](supabase/migrations/20260817_app_settings.sql) —
-  **à lancer par Victor**, rien ne marche avant.
-- `lib/settings.ts` : **la base a la priorité, `RIOT_API_KEY` reste le filet de secours.**
-  `lib/riot/client.ts` appelle `cleRiot()` au lieu de lire `process.env`.
-  **Cache mémoire de 30 s obligatoire** : un seul import déclenche ~43 `riotFetch`, donc
-  autant de lectures de la même ligne sans lui. L'écriture vide le cache du process.
-- `app/api/admin/riot-key` : `GET` rend l'état **masqué**, `POST` remplace la clé (format
-  `RGAPI-` + UUID exigé). Contrôle d'accès **côté serveur**, sur l'email de la session.
-- `AdminKeyButton` dans la rangée haut-droite de `/suivi`, aux mêmes classes que ses deux
-  voisins. Il ne rend rien pour les autres comptes.
-- L'admin est **en dur** dans [lib/admin.ts](lib/admin.ts) : le changer exige un commit,
-  donc laisse une trace. Une liste en base ou en env se modifie sans bruit.
-
-**Vérifié** — `tsc --noEmit`, `npm run test` (109), `npm run build` (15 routes) passent.
-Appel direct non authentifié de `/api/admin/riot-key` : **307 vers `/login`**, en `GET`
-comme en `POST`, rien écrit. **Le repli est prouvé en vrai** : la table n'existant pas
-encore, `[settings]` a crié dans les logs et l'app a bien utilisé `RIOT_API_KEY`.
-**Non vérifié en conditions réelles** : le refus 403 d'un compte connecté **non**
-administrateur (il faudrait un second compte), et l'écran jamais ouvert dans un navigateur.
-
-> **Clé Riot expirée pour la 4ᵉ fois**, constatée ce jour (`401 Unknown apikey`). C'est
-> exactement ce que cet écran sert à réparer sans toucher au serveur.
-
-**Reste ouvert** — le bouton n'apparaît que pour l'email **exactement**
-`grosgalio@gmail.com` ; les captures de la session montraient `galiogros@gmail.com` puis
-`paul.gentil2240@gmail.com`. **Si le compte de l'app n'a pas cette adresse, le bouton
-reste invisible** — c'est la première chose à vérifier.
-
-> ### Le secret est en base, et ça a un prix
-> `app_settings` n'a **aucune policy RLS**, comme `match_facts` : seule la clé
-> `service_role` y accède. Ici ce n'est pas du confort — la table contient un secret en
-> clair. Une policy de lecture, même restreinte à un compte, l'exposerait à l'API REST
-> donc au navigateur. **La clé ne ressort jamais de l'API**, seulement masquée
-> (`re_Dfz••••••••oRBB`) : on la remplace, on ne la relit pas.
-> Contrepartie assumée : elle se retrouve **en clair dans toute sauvegarde de la base**.
-> Une clé Resend compromise se révoque sur resend.com, elle ne se répare pas.
 
 ---
 
@@ -371,6 +375,14 @@ pas du code.
         Depuis la réécriture du 2026-08-17 il décrit en plus du contenu qui n'existe plus.
       - `secondary_role` — demandé au joueur à l'onboarding, écrit en base, jamais relu.
       - `wins` / `losses` — remontés par les deux routes API jusqu'au state React, jamais affichés.
+- [ ] **Seuils de « trop de rôles » et « trop de champions » à retrancher ?** Sur un compte
+      comme Dickapryo#EUW (bronze, 3 rôles, pool de 3), les deux se taisent alors que Victor
+      s'attendait à les voir. Trois leviers possibles, aucun tranché : compter les champions
+      tous rôles confondus (comme avant le 17/08), descendre le seuil de rôles de 4 à 3, ou
+      inclure Flex et normales — ces deux bandeaux ne regardent que la SoloQ.
+- [ ] **Le message de clé expirée ne s'affiche pas sur `/suivi`.** Le cockpit avale ses échecs
+      d'import (`try { … } catch {}`), donc clé morte = rang absent sans un mot. C'est
+      pourtant le seul écran où le message servirait vraiment.
 - [ ] **L'échec du rang est avalé en silence**
       ([app/api/riot/import/route.ts:217](app/api/riot/import/route.ts#L217)) : `.catch(() => [])`
       transforme un `401 Unknown apikey` en « pas de rang », sans un mot dans la réponse ni

@@ -194,7 +194,7 @@ describe("rolesBanner", () => {
       game({ lane: "Jungle" }),
       game({ lane: "Support" }),
     ];
-    expect(performanceBanners(games, PLATINUM)[0].id).toBe("roles");
+    expect(performanceBanners(games, PLATINUM, null)[0].id).toBe("roles");
   });
 
   it("ne dit rien en dessous de 4 roles", () => {
@@ -212,7 +212,7 @@ describe("rolesBanner", () => {
   // pour tout le monde, donc il s'affiche aussi sans seuils.
   it("s'affiche meme sans seuils de palier", () => {
     const games = roles.slice(0, 4).map((lane) => game({ lane }));
-    expect(performanceBanners(games, null).map((b) => b.id)).toEqual(["roles"]);
+    expect(performanceBanners(games, null, null).map((b) => b.id)).toEqual(["roles"]);
   });
 });
 
@@ -267,7 +267,7 @@ describe("performanceBanners", () => {
       game({ lane: "Jungle" }),
       game({ lane: "Support" }),
     ];
-    const banners = performanceBanners(games, PLATINUM);
+    const banners = performanceBanners(games, PLATINUM, null);
     expect(banners.map((b) => b.severity)).toContain("great");
     expect(banners.map((b) => b.severity)).toContain("bad");
 
@@ -281,7 +281,66 @@ describe("performanceBanners", () => {
     expect(values).toEqual([...values].sort((a, b) => a - b));
   });
 
+
+  // Demande de Victor du 2026-08-17 : les stats ne se jugent que dans le role
+  // principal. Un mid qui depanne ailleurs ne doit pas voir son farm de mid
+  // moyenne avec des games d'un autre role.
+  it("ne juge les stats que sur les games du role principal", () => {
+    // Le contraste se fait avec TOP, pas avec la jungle : la jungle n'est pas
+    // une lane de farm (cf. FARM_LANES), elle serait donc deja ecartee du
+    // bandeau de farm sans que le filtre de role y soit pour quoi que ce soit.
+    // Le test ne prouverait alors rien.
+    const games = [
+      // Deux games de mid impeccables.
+      game({ lane: "Mid", cs20: 180 }),
+      game({ lane: "Mid", cs20: 180 }),
+      // Et six games de top catastrophiques, qui ne doivent PAS compter.
+      ...Array.from({ length: 6 }, () => game({ lane: "Top", cs20: 20 })),
+    ];
+
+    const farmMid = performanceBanners(games, PLATINUM, "mid").find((b) => b.id === "farm-pre20");
+    const farmTous = performanceBanners(games, PLATINUM, null).find((b) => b.id === "farm-pre20");
+
+    // Filtre sur mid : le verdict reste au vert le plus haut.
+    expect(farmMid?.severity).toBe("great");
+    // Sans filtre, les games de jungle tirent la moyenne vers le bas — c'est
+    // exactement le melange que le filtre supprime.
+    expect(farmTous?.severity).toBe("bad");
+  });
+
+  // Ces deux-la echappent au filtre, et ce n'est pas un oubli : "trop de roles"
+  // compte justement les roles, et le pool a besoin de voir les autres roles
+  // pour designer le plus charge.
+  it("laisse les bandeaux roles et champions voir tous les roles", () => {
+    const games = [
+      game({ lane: "Mid" }),
+      game({ lane: "Top" }),
+      game({ lane: "Jungle" }),
+      game({ lane: "Support" }),
+    ];
+
+    // Filtre sur mid : si "roles" etait filtre lui aussi, il ne verrait qu'un
+    // seul role et ne pourrait plus jamais se declencher.
+    expect(performanceBanners(games, PLATINUM, "mid").map((b) => b.id)).toContain("roles");
+  });
+
+  // Un joueur dont l'echantillon ne contient aucune game du role principal :
+  // pas de bandeau de stats, plutot que les stats d'un autre role sous une
+  // etiquette fausse.
+  it("ne rend aucun bandeau de stats quand le role principal est absent", () => {
+    // Encore une fois du TOP et non de la jungle : il faut des games qui
+    // DONNERAIENT un bandeau de farm sans le filtre, sinon leur absence ne
+    // prouve rien.
+    const games = [game({ lane: "Top" }), game({ lane: "Top" })];
+
+    expect(performanceBanners(games, PLATINUM, null).map((b) => b.id)).toContain("farm-pre20");
+
+    const ids = performanceBanners(games, PLATINUM, "mid").map((b) => b.id);
+    expect(ids).not.toContain("farm-pre20");
+    expect(ids).not.toContain("deaths");
+  });
+
   it("ne rend aucun bandeau dependant du palier sans seuils", () => {
-    expect(performanceBanners([game()], null)).toEqual([]);
+    expect(performanceBanners([game()], null, null)).toEqual([]);
   });
 });

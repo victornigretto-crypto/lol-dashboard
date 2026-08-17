@@ -16,6 +16,7 @@ import {
 } from "@/lib/content";
 import { championIconUrl, useDdragonVersion } from "@/lib/ddragon";
 import { rememberRiotId } from "@/lib/pendingRiotId";
+import { EARLIEST_GAME_ISO, sampleForAnalysis } from "@/lib/sample";
 import { rankEmblemUrl, rankLabel } from "@/lib/riot/rank";
 import { formatDuration, formatGameDate, parseRiotId } from "@/lib/riot/transform";
 import { AnalysisPanel } from "./_components/AnalysisPanel";
@@ -87,17 +88,13 @@ async function fetchGames(riotId: string, filter: Filter): Promise<SearchResult>
   return body as SearchResult;
 }
 
-// Une game est "récente" si elle date de moins de 2 mois : au-delà, elle est
-// repliée dans l'UI et exclue des moyennes d'analyse.
-function isRecent(playedAt: string): boolean {
-  const cutoff = new Date();
-  cutoff.setMonth(cutoff.getMonth() - 2);
-  return new Date(playedAt) >= cutoff;
-}
-
-function filterRecent(games: RiotGame[]): RiotGame[] {
-  return games.filter((g) => isRecent(g.played_at));
-}
+// Le plancher d'analyse, écrit tel qu'un joueur le lit. Dérivé de la constante
+// partagée : la date ne doit exister qu'à un seul endroit (lib/sample).
+const PLANCHER_LISIBLE = new Date(EARLIEST_GAME_ISO).toLocaleDateString("fr-FR", {
+  day: "numeric",
+  month: "long",
+  year: "numeric",
+});
 
 const ROLE_LABELS: Record<Role, string> = {
   mid: "Mid",
@@ -240,7 +237,6 @@ export default function Home() {
   const [analyzeError, setAnalyzeError] = useState<string | null>(null);
   const [banners, setBanners] = useState<Banner[]>([]);
   const [tiltAlert, setTiltAlert] = useState(false);
-  const [showOlder, setShowOlder] = useState(false);
 
   // Porte d'entrée unique (Slice 4) : "/" est la page publique d'analyse
   // gratuite. Un user déjà connecté n'a rien à y faire — il atterrit direct
@@ -276,7 +272,6 @@ export default function Home() {
   const search = async (riotId: string, chosenFilter: Filter): Promise<SearchResult | null> => {
     setLoading(true);
     setError(null);
-    setShowOlder(false);
     try {
       const body = await fetchGames(riotId, chosenFilter);
       setAccount(body.account);
@@ -324,7 +319,6 @@ export default function Home() {
     setBanners([]);
     setTiltAlert(false);
     setAnalyzeError(null);
-    setShowOlder(false);
   };
 
   // Deux jeux de données indépendants, traités en parallèle : le winrate
@@ -348,29 +342,35 @@ export default function Home() {
     };
 
     const soloqTask = Promise.resolve(initial).then((data) => {
-      const recent = filterRecent(data.games);
-      const banner = winrateBanner(recent);
+      // Winrate : les 20 dernières parties, point. Aucun filtre de rôle — il
+      // mesure un résultat de file, pas l'exécution d'une lane.
+      const banner = winrateBanner(sampleForAnalysis(data.games));
       if (banner) setBanners((prev) => sortBanners([...prev, banner]));
     }, onFail);
 
     const rankedTask = fetchGames(riotId, "ranked").then((data) => {
-      const recent = filterRecent(data.games);
-      const extra = performanceBanners(recent, thresholds);
+      const sample = sampleForAnalysis(data.games);
+      // Le rôle vient de l'échantillon analysé, pas de la totalité des games
+      // rapatriées : c'est bien le rôle des parties qu'on juge.
+      const role = dominantRole(sample.map((g) => g.lane));
+      const extra = performanceBanners(sample, thresholds, role);
       if (extra.length > 0) setBanners((prev) => sortBanners([...prev, ...extra]));
-      setTiltAlert(isTilted(recent));
+      setTiltAlert(isTilted(sample));
     }, onFail);
 
     await Promise.allSettled([soloqTask, rankedTask]);
     setAnalyzing(false);
   };
 
-  const recentGames = games.filter((g) => isRecent(g.played_at));
-  const olderGames = games.filter((g) => !isRecent(g.played_at));
-  const content = resolveContent(games, rank);
+  // Les parties affichées sont EXACTEMENT celles qui servent à l'analyse : plus
+  // de repli « plus de 2 mois », plus de game masquée dont dépendrait un
+  // bandeau. Ce que le joueur voit est ce qui a été jugé.
+  const analysedGames = sampleForAnalysis(games);
+  const content = resolveContent(analysedGames, rank);
   const thresholds = resolveThresholds(rank);
   // Le rôle affiché vient des games analysées, pas d'un `primary_role` en
   // base : un compte public n'en a pas.
-  const dominant = dominantRole(games.map((g) => g.lane));
+  const dominant = dominantRole(analysedGames.map((g) => g.lane));
   const roleLabel = dominant ? ROLE_LABELS[dominant] : null;
 
   if (checkingSession) {
@@ -540,26 +540,17 @@ export default function Home() {
                   <p className="text-center text-slate-400">Aucune game trouvée pour ce filtre.</p>
                 ) : (
                   <>
-                    {recentGames.map((game) => (
+                    {analysedGames.map((game) => (
                       <GameRow key={game.riot_match_id} game={game} thresholds={thresholds} content={content} ddragonVersion={ddragonVersion} />
                     ))}
-                    {recentGames.length === 0 && olderGames.length > 0 && (
-                      <p className="text-center text-slate-400">Aucune game de moins de 2 mois pour ce filtre.</p>
+                    {/* Le filtre a bien ramené des parties, mais toutes sont
+                        antérieures au plancher. Le dire, plutôt que de laisser
+                        une liste vide sans explication. */}
+                    {analysedGames.length === 0 && (
+                      <p className="text-center text-slate-400">
+                        Aucune partie depuis le {PLANCHER_LISIBLE} pour ce filtre.
+                      </p>
                     )}
-                    {olderGames.length > 0 && (
-                      <button
-                        onClick={() => setShowOlder((v) => !v)}
-                        className="mt-2 rounded-lg border border-slate-700 px-4 py-2 text-sm text-slate-300 hover:bg-slate-800"
-                      >
-                        {showOlder
-                          ? "Masquer les parties datant de plus de 2 mois"
-                          : `Voir les parties datant de plus de 2 mois (${olderGames.length})`}
-                      </button>
-                    )}
-                    {showOlder &&
-                      olderGames.map((game) => (
-                        <GameRow key={game.riot_match_id} game={game} thresholds={thresholds} content={content} ddragonVersion={ddragonVersion} />
-                      ))}
                   </>
                 )}
               </div>

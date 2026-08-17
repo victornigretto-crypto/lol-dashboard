@@ -216,9 +216,11 @@ export function rolesBanner(games: BannerGame[]): Banner | null {
   return {
     id: "roles",
     severity: "bad",
-    // En tête de liste quoi qu'il arrive : tant que le joueur éparpille ses
-    // games sur 4 rôles, les autres bandeaux moyennent des lanes qui n'ont
-    // pas les mêmes attentes, et disent donc peu de chose.
+    // En tête de liste quoi qu'il arrive. La raison a changé le 2026-08-17 :
+    // les bandeaux de stats ne moyennent plus des lanes différentes, ils sont
+    // filtrés sur le rôle principal. Mais éparpiller ses games reste le
+    // problème numéro un — et c'est désormais AUSSI ce qui vide l'échantillon
+    // analysé, puisque seules les parties du rôle principal y entrent.
     pinned: true,
     text: "Tu joues trop de rôle !!!",
     detail: `${played.size} rôles différents sur tes ${sample.length} dernières SoloQ (${named.join(", ")})`,
@@ -263,14 +265,40 @@ export function championPoolBanner(
   };
 }
 
+// Les parties jouées dans un rôle donné. Rôle inconnu — compte public sans
+// rôle dominant, profil sans `primary_role` — : on ne filtre pas, mieux vaut
+// une moyenne tous rôles confondus que pas de bandeau du tout.
+function roleGames(games: BannerGame[], role: Role | null): BannerGame[] {
+  if (role === null) return games;
+  return games.filter((g) => roleFromLane(g.lane) === role);
+}
+
 // Les bandeaux partagés par / et /suivi, dans l'ordre d'affichage. Les pages y
 // ajoutent leurs bandeaux propres (winrate côté /).
-export function performanceBanners(games: BannerGame[], thresholds: TierThresholds | null): Banner[] {
+//
+// `role` est le rôle principal du joueur. Les bandeaux de STATS ne jugent que
+// les parties de ce rôle (demande de Victor du 2026-08-17) : un mid qui dépanne
+// au support ne doit pas voir son farm de mid moyenné avec des games de
+// support, où les attentes n'ont rien à voir.
+//
+// Les deux derniers, en revanche, restent sur TOUT l'échantillon, et ce n'est
+// pas un oubli :
+//   - "trop de rôles" compte justement les rôles — le filtrer par rôle le
+//     rendrait incapable de se déclencher, un seul rôle survivant par
+//     construction ;
+//   - le pool de champions se compte déjà par rôle en interne, et a besoin de
+//     voir les autres rôles pour désigner le plus chargé.
+export function performanceBanners(
+  games: BannerGame[],
+  thresholds: TierThresholds | null,
+  role: Role | null
+): Banner[] {
+  const stats = roleGames(games, role);
   return sortBanners(
     [
-      farmPre20Banner(games, thresholds),
-      farmPost20Banner(games, thresholds),
-      deathsBanner(games, thresholds),
+      farmPre20Banner(stats, thresholds),
+      farmPost20Banner(stats, thresholds),
+      deathsBanner(stats, thresholds),
       rolesBanner(games),
       championPoolBanner(games, thresholds),
     ].filter((b): b is Banner => b !== null)

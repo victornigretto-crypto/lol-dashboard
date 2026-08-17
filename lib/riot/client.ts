@@ -19,6 +19,13 @@ function sleep(ms: number) {
 
 const MAX_RETRIES = 5;
 
+// Le message montré au joueur quand Riot refuse la clé. Exporté pour que le
+// reste du code puisse le reconnaître sans le recopier — une chaîne dupliquée
+// finirait par diverger d'un caractère, et la comparaison échouerait en
+// silence.
+export const CLE_EXPIREE =
+  "Expiration de la clef API : Contacter Gros Galio pour lui demander de la refresh";
+
 async function riotFetch<T>(host: string, path: string, attempt = 0): Promise<T> {
   // `cleRiot()` garde la valeur en mémoire une trentaine de secondes : un seul
   // import déclenche une quarantaine d'appels ici, il n'est pas question
@@ -46,6 +53,22 @@ async function riotFetch<T>(host: string, path: string, attempt = 0): Promise<T>
     // resynchronisent leurs retries et ne recréent le même pic de requêtes.
     await sleep((retryAfter + 0.5 + Math.random()) * 1000);
     return riotFetch<T>(host, path, attempt + 1);
+  }
+
+  // Clé refusée par Riot. La dev key expire toutes les 24 h, et c'est de très
+  // loin la panne la plus fréquente du projet (quatre fois en cinq jours, cf.
+  // MEMOIRE). L'utilisateur voyait jusqu'ici `Riot API 401 sur /lol/...:
+  // {"status":{"message":"Unknown apikey"...}}` — illisible, et surtout
+  // inactionnable : rien ne lui disait quoi faire.
+  //
+  // 401 et 403 sont traités ensemble : Riot renvoie l'un ou l'autre selon que
+  // la clé est inconnue ou expirée, et dans les deux cas le remède est le même.
+  // Le détail technique n'est pas perdu pour autant, il part dans les logs
+  // serveur — c'est là qu'on le cherche, pas dans l'écran du joueur.
+  if (res.status === 401 || res.status === 403) {
+    const detail = await res.text().catch(() => "");
+    console.error(`[riot] clé refusée (${res.status}) sur ${path} : ${detail || res.statusText}`);
+    throw new Error(CLE_EXPIREE);
   }
 
   if (!res.ok) {
