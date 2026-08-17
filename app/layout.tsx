@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import { FeedbackButton } from "./_components/FeedbackButton";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -27,7 +28,13 @@ export default function RootLayout({
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      {/* Le bouton de retour vit ICI, dans le layout racine : il est ainsi sur
+          tous les écrans sans qu'aucune page ait à y penser, et il ne peut pas
+          manquer sur celle qu'on ajoutera demain. */}
+      <body className="min-h-full flex flex-col">
+        {children}
+        <FeedbackButton />
+      </body>
     </html>
   );
 }

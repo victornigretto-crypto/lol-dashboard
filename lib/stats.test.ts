@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   alertClass,
   averageCsPerMin,
+  bandClass,
   csBand,
   csMetrics,
   deathsBand,
@@ -160,23 +161,37 @@ describe("averageCsPerMin", () => {
 });
 
 describe("csBand / deathsBand — sens de comparaison", () => {
-  const farm: StatThreshold = { green: 7.5, yellow: 6.375 };
-  const morts: StatThreshold = { green: 1, yellow: 2 };
+  // Les seuils platine, tels que recalibres par Victor.
+  const farm: StatThreshold = { great: 8.5, good: 7, warn: 6.5 };
+  const morts: StatThreshold = { great: 1, good: 2, warn: 2.5 };
 
-  // Farm : plus grand = mieux. Les bornes sont inclusives.
-  it("farm — vert a partir du seuil, jaune a partir du sien", () => {
-    expect(csBand(7.5, farm)).toBe("good");
-    expect(csBand(7.4, farm)).toBe("warn");
-    expect(csBand(6.375, farm)).toBe("warn");
-    expect(csBand(6.3, farm)).toBe("bad");
+  // Farm : plus grand = mieux. Les bornes sont inclusives du cote favorable —
+  // etre PILE au seuil, c'est l'avoir atteint.
+  it("farm — les quatre bandes, bornes inclusives", () => {
+    expect(csBand(8.5, farm)).toBe("great");
+    expect(csBand(8.4, farm)).toBe("good");
+    expect(csBand(7, farm)).toBe("good");
+    expect(csBand(6.9, farm)).toBe("warn");
+    expect(csBand(6.5, farm)).toBe("warn");
+    expect(csBand(6.4, farm)).toBe("bad");
   });
 
-  // Morts : logique inversee, plus petit = mieux.
-  it("morts — logique inversee", () => {
-    expect(deathsBand(1, morts)).toBe("good");
-    expect(deathsBand(1.5, morts)).toBe("warn");
-    expect(deathsBand(2, morts)).toBe("warn");
-    expect(deathsBand(2.1, morts)).toBe("bad");
+  // Morts : logique inversee, plus petit = mieux. Le vert fonce est en BAS.
+  it("morts — logique inversee sur les quatre bandes", () => {
+    expect(deathsBand(1, morts)).toBe("great");
+    expect(deathsBand(1.1, morts)).toBe("good");
+    expect(deathsBand(2, morts)).toBe("good");
+    expect(deathsBand(2.1, morts)).toBe("warn");
+    expect(deathsBand(2.5, morts)).toBe("warn");
+    expect(deathsBand(2.6, morts)).toBe("bad");
+  });
+
+  // Le vert pale et le vert fonce doivent rester deux couleurs distinctes :
+  // les confondre annulerait la demande du 2026-08-17.
+  it("donne deux fonds differents aux deux verts", () => {
+    expect(bandClass("great")).not.toBe(bandClass("good"));
+    expect(bandClass("great")).toContain("green");
+    expect(bandClass("good")).toContain("green");
   });
 
   // Choix structurant : seuils ou valeur inconnus -> on ne dit rien plutot que
@@ -212,6 +227,7 @@ describe("clignotement", () => {
   it("reste muet sur une stat surveillee mais pas rouge", () => {
     expect(alertClass(iron, "csPre20", "warn")).toBe("");
     expect(alertClass(iron, "csPre20", "good")).toBe("");
+    expect(alertClass(iron, "csPre20", "great")).toBe("");
   });
 
   // On n'alerte pas sur ce qu'on ne sait pas juger : sans seuils de palier, la
@@ -219,7 +235,7 @@ describe("clignotement", () => {
   it("une valeur non jugeable ne clignote jamais", () => {
     expect(alertClass(iron, "csPre20", "unknown")).toBe("");
     expect(alertClass(iron, "csPre20", csBand(4, null))).toBe("");
-    expect(alertClass(iron, "csPre20", csBand(null, { green: 8, yellow: 6 }))).toBe("");
+    expect(alertClass(iron, "csPre20", csBand(null, { great: 9, good: 8, warn: 6 }))).toBe("");
   });
 
   // Emeraude ne surveille aucune stat : aucune cellule chiffree ne doit

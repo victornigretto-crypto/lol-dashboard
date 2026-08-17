@@ -13,6 +13,289 @@
 
 ---
 
+### 2026-08-17 (2) — Quatre bandes de couleur au lieu de trois
+
+**Contexte** — Victor a recalibré toute la grille et ajouté un **vert pâle** entre le jaune
+et le vert, en durcissant le vert existant.
+
+**Changé**
+- `StatThreshold` passe de `{green, yellow}` à **`{great, good, warn}`** : trois points de
+  coupure, quatre bandes. `Band` gagne `"great"`. Toute la table de
+  [thresholds.ts](lib/content/thresholds.ts) est réécrite aux valeurs de Victor.
+- Couleurs : vert foncé **`bg-green-700`**, vert pâle **`bg-green-400`** (texte noir).
+- `Severity` des bandeaux **n'existe plus séparément** : `= Exclude<Band, "unknown">`, et
+  `SEVERITY_CLASS` dérive de `bandClass`. Les deux tables de couleurs jumelles signalées
+  en début de session ne peuvent plus diverger.
+- Textes des bandeaux réécrits sur 4 niveaux ; **le jaune des morts s'affiche désormais**
+  (il était masqué). Détail = mesure + verdict, l'objectif cité étant toujours le
+  **vert pâle**, jamais le vert foncé.
+- Farm avant 20 min : le détail passe en **CS totaux** (« 146 CS à 20 mins »), seuil
+  converti ×20. Le calcul reste en CS/min — seul l'affichage change.
+- Winrate : les deux zones vertes se distinguent enfin (vert pâle 50-62 %, vert foncé
+  au-dessus). Bornes numériques **inchangées**, seuls les textes ont bougé.
+
+**Puis adouci le jour même**, Victor jugeant la première grille trop sévère : les morts
+passent de `warn` 3.0 à **2.5** partout à partir d'argent, avec un vert pâle beaucoup plus
+large (≤ 2 jusqu'à platine, ≤ 1.75 en émeraude) ; le vert pâle du farm à 20 min descend en
+iron (6.0) et en platine (7.0), et émeraude perd son jaune à 7.0 pour 6.5.
+
+Puis la **zone 0.5 – 1 mort/10 min**, que la grille laissait sans bande sur les paliers
+hauts, a été tranchée dans les deux sens : **platine** passe en vert foncé dès **1.0**
+(au lieu de 0.5), **émeraude → challenger** étendent leur vert pâle jusqu'à **0.5**.
+Émeraude n'a demandé aucun changement de valeur — c'était déjà ce que le code calculait ;
+ce qui change est que **c'est désormais une décision et non un effet de bord**, tenue par
+un test qui exige que les deux verts se touchent à tous les paliers.
+
+**Le tableau de `/suivi` passe en `table-fixed`** (il était en `auto`) : c'est la seule
+façon d'avoir **trois colonnes de questions strictement égales**, l'`auto` calant chaque
+colonne sur son contenu — donc inégales, et mouvantes à chaque frappe. Largeurs posées :
+Matchup **230** (était 160), V/D 70, CS/20 **74**, CS>20 **80**, Morts **78**, les trois
+questions **175** chacune, Résumé **155**. La colonne Matchup s'organise désormais en
+**quatre lignes** : visages · noms · lane & file · date & durée.
+
+**Deux changements d'affichage** pour finir : `Banner` gagne un champ **`pinned`** qui
+passe **avant** le tri par sévérité, et **« Tu joues trop de rôle !!! » est épinglé** —
+il est en tête même quand tout le reste est vert, parce qu'un joueur éparpillé sur 4 rôles
+fait moyenner des lanes qui n'ont pas les mêmes attentes. Et sur `/suivi`, « Changer de
+profil » devient **« Synchroniser avec un autre compte »**, en rouge plein.
+
+**Vérifié** — `tsc --noEmit`, `npm run test` (**109**), `npm run build` (13 pages) : les
+trois passent. Les vrais bandeaux exécutés sur les 20 vraies games de Victor rendent, en
+platine, **trois verts pâles** : « Bon farm en lane » (146 CS), « Bon side laner » (7.2),
+« Joueur safe » (1.4). Le même échantillon vu en émeraude bascule le farm en jaune, ce qui
+confirme que les seuils mordent bien par palier. **Non vérifié en conditions réelles** :
+aucune de ces couleurs n'a été vue dans un navigateur — ni les cases du tableau, ni le
+rendu du vert pâle à côté du jaune.
+
+**Reste ouvert**
+- **Le profil de Victor ne déclenche plus rien** après l'adoucissement : trois bandeaux
+  verts, aucune alerte. À regarder si le cockpit paraît devenu trop complaisant.
+- *(réglé)* La zone 0.5 – 1 des morts est comblée partout : vert foncé jusqu'à 1.0 en
+  platine, vert pâle jusqu'à 0.5 en émeraude → challenger.
+- Le détail du pool de champions **ne nomme plus le rôle** qui a déclenché, alors que le
+  comptage reste par rôle : « 6 champions sur tes 7 dernières parties » se lit comme un
+  total.
+- **Le seuil de défilement horizontal du tableau est monté de ~1510 à ~1590 px de
+  fenêtre** : c'est le prix de la colonne Matchup élargie. Sur un portable 1440 px, le
+  tableau défile désormais dans son cadre alors qu'il tenait avant. Mesuré, pas déduit.
+- Sur `/suivi`, le bouton rouge « Synchroniser avec un autre compte » et le bouton de
+  confirmation « Changer et supprimer » sont **tous deux en rouge plein et visibles en même
+  temps** quand le panneau est ouvert. Le second est irréversible. À départager à l'œil.
+- Le texte d'avertissement du panneau dit encore **« Changer de profil supprime
+  définitivement tes données »**, formule que le bouton n'emploie plus.
+
+### 2026-08-17 — Cockpit en tableau, contenu des 6 paliers, outillage de test
+
+**Contexte** — suite de la même session que l'entrée du 2026-08-16 : parcours public,
+puis refonte du cockpit et rédaction du contenu pédagogique.
+
+**Changé**
+- Outillage : **Vitest** installé (`npm run test` / `test:watch`), **97 assertions** sur
+  `lib/`. Definition of done dans [CLAUDE.md](CLAUDE.md) + garde-fous (rien à l'échelle
+  système sur cette machine, rien de destructif sans demande).
+- MEMOIRE.md borné à 3 entrées, le reste dans [MEMOIRE_ARCHIVE.md](MEMOIRE_ARCHIVE.md).
+  `supabase/migrations/` créé avec sa convention.
+- Parcours public : bandeau bleu **« Me connecter pour analyser ma progression »** sur `/`
+  et sur l'écran de résultat ; déconnexion vers `/` ; « Continuer sans se connecter » sur
+  `/login` ; le mot « gratuite » retiré de l'UI.
+- `/suivi` : les cartes deviennent un **tableau type tableur** (9 colonnes, hauteur de
+  ligne variable, saisie dans la cellule, réponses multiples conservées). Conteneur élargi
+  à **1600 px** — choix de Victor contre l'alternative du panneau d'analyse repliable.
+- **Contenu réécrit pour les 6 paliers** (intro, points, 3 questions) + nouveau
+  `highlightFields` pour mettre une question en avant, pas seulement une stat.
+- Signalement : **contour bleu fixe sur l'en-tête** (ce que le palier travaille),
+  **clignotement sur la cellule** seulement si le palier surveille la stat ET qu'elle est
+  rouge.
+
+**Vérifié** — `tsc --noEmit`, `npm run test` (97), `npm run build` (13 pages) : les trois
+passent. Rendu et mesures (largeurs, hauteurs de ligne, contours) faits sur maquette servie
+avec le **CSS compilé de l'app**. **Non vérifié en conditions réelles** : `/suivi` exige une
+session, et l'accueil reste incapturable en headless.
+
+**Reste ouvert** — mobile hors périmètre (sous ~1510 px de viewport le tableau défile
+horizontalement) ; `bucketThemes` décrit encore l'ancien contenu et reste code mort.
+
+### 2026-08-16 — Le cache partagé : une recherche coûtait 86 appels Riot pour un quota de 100
+
+**Le symptôme rapporté :** « il ne se passe rien quand j'appuie sur Entrée ». Il se passait
+quelque chose — le « ... » du bouton **est** l'indicateur de chargement
+([page.tsx:369](app/page.tsx#L369)) — mais la réponse mettait jusqu'à **3 minutes**. Le log
+du serveur montre l'emballement : `4.1s → 8.5s → 57s → 63s → 3.0min`.
+
+**La cause immédiate**, et le chiffre à retenir : **une seule recherche depuis l'accueil
+coûtait ~86 appels Riot, pour un quota de 100 par 2 minutes.** Le détail : `handleSubmit`
+appelle `search(riotId, "soloq")` (43 appels), **puis** `handleAnalyze` refait un import
+complet avec le filtre `ranked` (43 de plus) — et les deux listes se recouvrent largement,
+donc on retéléchargeait les mêmes parties 4 secondes après. Le log le confirme : les `POST
+/api/riot/import` arrivent **systématiquement par paires**. Victor ne pouvait donc pas
+faire deux recherches d'affilée sans saturer le quota ; ce n'était pas son comportement,
+c'était le premier clic.
+
+**La cause profonde — personne ne possédait l'accès à Riot.** `lib/riot/client.ts` était un
+wrapper de transport (URL + clé + retry naïf). Combien d'appels, à quelle fréquence, mis en
+cache ou pas, annulable ou pas : chaque appelant décidait dans son coin, et **le budget
+global n'appartenait à personne**. Corollaire structurel : le seul cache existant était
+`games`, indexé par `(user_id, puuid)` — donc **l'analyse gratuite, le parcours de chaque
+visiteur, était le seul chemin sans aucun cache**, et c'est aussi celui qui faisait le
+travail en double.
+
+**Ce qui a été livré : le cache partagé `match_facts`.** Une partie terminée est une donnée
+**publique et immuable** ; elle n'a rien à faire dans une table qui appartient à un user.
+Nouvelle table, clé `(riot_match_id, puuid)` — et pas `riot_match_id` seul, parce qu'une
+partie contient 10 joueurs dont les faits diffèrent. Deux joueurs de la même partie se
+partagent donc réellement le cache, chacun sur sa ligne : le bénéfice grandit avec le
+nombre d'utilisateurs, ce qui est la direction voulue par Victor (« potentiellement plus
+d'utilisateurs un jour »).
+
+| | avant | après |
+|---|---|---|
+| recherche à froid | 6,0 s | 3,3 s |
+| **recherche répétée** | **6,0 s** | **0,23 – 0,58 s** |
+| appels Riot, recherche répétée | ~86 | ~6 |
+
+**Trois décisions à ne pas défaire :**
+
+1. **On cache les faits extraits, jamais le brut.** Mesuré ce jour : un match pèse 77 Ko et
+   sa timeline **827 Ko** — 17,7 Mo pour 20 parties. Une ligne de `match_facts` fait
+   ~200 octets. Et ce sont les mêmes faits bruts que `games` (`cs20`, `cs_final`, `deaths`,
+   `deaths_last5`) : les CS/min, la pondération et les couleurs restent calculés à la
+   lecture, donc **une règle qui change n'oblige jamais à purger le cache**.
+2. **La table n'a AUCUNE policy RLS**, et c'est le point de sécurité. RLS active sans policy
+   = tout refusé à `anon` et `authenticated` ; seule la clé `service_role` passe
+   ([lib/supabase/admin.ts](lib/supabase/admin.ts)). Ouvrir l'écriture à `anon` permettrait
+   d'insérer de faux faits par l'API REST, **resservis ensuite à tous les autres
+   utilisateurs** comme s'ils venaient de Riot. Aucune policy SQL ne peut vérifier qu'une
+   ligne vient de Riot : garder l'écriture côté serveur est la seule protection.
+3. **`games` reçoit désormais TOUTES les lignes affichées, plus seulement les nouvelles.**
+   C'est le piège que le cache crée : une partie servie par `match_facts` n'est jamais
+   retéléchargée, donc en n'écrivant que les nouvelles elle n'atterrirait **jamais** dans les
+   games du joueur — et `/suivi`, qui lit `games` en direct, afficherait un cockpit vide.
+   L'upsert est idempotent et n'énumère toujours pas les colonnes de notes.
+
+L'invariant anti-pollution est intact : `persist` ne gouverne plus que `games`. Le cache
+partagé n'appartient à personne, l'alimenter depuis l'analyse d'un inconnu est sans risque.
+
+**Le bug attrapé par le test, et la leçon de méthode.** Après avoir branché le cache, j'ai
+comparé **octet pour octet** la réponse servie par le cache et celle d'un appel Riot
+complet, cache vidé puis reconstruit. Divergence de **exactement 100 octets** : Postgres
+rend un `timestamptz` en `...+00:00` là où `toISOString()` donne `...Z` — 5 caractères ×
+20 lignes. `new Date()` parse les deux à l'identique, donc **rien n'aurait cassé et rien ne
+serait jamais apparu dans un log** ; mais la même partie sortait avec deux `played_at`
+différents selon l'état du cache. Un cache dont la sortie dépend de son propre état n'est
+plus transparent. Normalisé à la lecture (`normalize` dans
+[matchCache.ts](lib/riot/matchCache.ts)), re-vérifié identique. **La comparaison
+octet-à-octet cache chaud / cache froid est LE test à refaire sur tout cache futur.**
+
+**Sécurité vérifiée dans les deux sens**, avec le contrôle anti-faux-positif : `INSERT`
+anonyme refusé (401), lecture anonyme à 0 ligne **alors que la table en contenait 20**, et
+la même clé anon renvoie bien 200 sur `games` — donc le refus vient de RLS et pas d'une clé
+invalide.
+
+**Dégradation gracieuse :** sans `SUPABASE_SERVICE_ROLE_KEY`, `createAdminClient()` renvoie
+`null`, un avertissement part dans les logs et l'app retombe exactement sur son
+comportement d'avant. Testé avant que la clé soit posée. Le cache est une optimisation,
+jamais une dépendance.
+
+**Clé Riot expirée, encore** (troisième fois). Même symptôme qu'au 13/08. À faire en premier
+réflexe le matin. La nouvelle clé a été relue par Next **sans redémarrage**, comme la
+dernière fois.
+
+**Parcours utilisateur — 4 changements demandés par Victor**, livrés :
+1. Accueil : le lien « Déjà un compte ? Connecte-toi » devient un bandeau bleu clair
+   **« Je veux analyser mes erreurs » → `/login`**. On ne propose plus une formalité de
+   compte, on nomme ce que le compte apporte.
+2. Écran de résultat de l'analyse gratuite : **reprend la disposition de `/suivi`** —
+   bandeau d'identité (Riot ID + rôle + rang empilé), « Sur quoi progresser » en pleine
+   largeur en bleu, puis analyse à gauche / historique à droite. Le rôle y est déduit des
+   games (`dominantRole`), un compte public n'ayant pas de `primary_role`.
+3. Un second bandeau **« Analyser mes erreurs »** s'intercale **entre les axes de
+   progression et l'historique** — là où le visiteur vient de voir ses erreurs sans pouvoir
+   les noter.
+4. La déconnexion mène à `/` et non `/login` ; `/login` gagne un
+   **« ← Continuer sans se connecter »** en haut à gauche. Arriver sur le formulaire n'est
+   plus un cul-de-sac.
+
+`AnalyzeErrorsBanner` est défini **une seule fois** dans `page.tsx` et utilisé aux deux
+endroits — deux copies auraient divergé, comme l'avaient fait les bandeaux d'analyse avant
+`lib/banners.ts`.
+
+**Ce qui N'A PAS pu être vérifié, et pourquoi.** J'ai piloté Chrome en CDP pour capturer les
+écrans. `/login` s'affiche et son lien de sortie est confirmé par requête DOM. Mais **`/`
+reste bloqué sur `LoadingDots` en headless** : `supabase.auth.getUser()` ne résout jamais et
+**aucune requête vers Supabase n'est émise** (toutes les requêtes réseau sont des chunks
+Next). Aucune exception, aucun 4xx, `localStorage` fonctionne, et `/login` s'hydrate
+normalement — donc React tourne. Reproduit en `--headless=new` **et** `--headless=old`.
+C'est un artefact du headless : l'accueil anonyme s'affiche bien dans le navigateur de
+Victor (capture au début de la session). **Piste pour la prochaine fois :** supabase-js
+sérialise ses accès session via `navigator.locks` ; c'est le premier endroit à regarder.
+Conséquence : **les points 1 et 2 du parcours n'ont été validés que par `tsc` et relecture.**
+
+> **Le piège de mesure du 10/08 s'est confirmé autrement.** Le benchmark « 4,8 s » de cette
+> date portait sur **une recherche isolée à froid**. Personne n'avait mesuré **deux
+> recherches d'affilée**, qui est le comportement réel. Le chiffre était juste, le scénario
+> faux — et c'est ce qui a laissé passer le facteur 2 de `handleAnalyze` pendant six jours.
+> Toujours mesurer la répétition, pas seulement le premier coup.
+
+**Le plan restant, décidé avec Victor** (priorités : fluidité + tenir la montée en charge) :
+slice 2 = **annulation de bout en bout** (`AbortSignal`, avec un traitement à part pour le
+chemin d'écriture de `/suivi`) ; slice 3 = **états de chargement honnêtes** ; slice 4 =
+**régulateur de débit**, à faire au moment du déploiement car il lui faut un état partagé
+(un seau à jetons en mémoire est faux dès qu'il y a plusieurs instances serverless).
+**Le fix « supprimer le double import » a été abandonné volontairement** : le cache le rend
+quasi gratuit, et les deux appels en parallèle font s'afficher le winrate SoloQ sans
+attendre l'analyse ranked — on ne sacrifie pas ça pour des appels qu'on ne paie plus.
+
+### 2026-08-13 (2) — Clé Riot expirée : le rang **et** les recommandations tombent ensemble
+
+**Premier vrai test de Victor dans l'app** (enfin — après trois sessions de code non vérifié).
+Symptôme rapporté sur `/suivi` : plus d'emblème, plus de palier, plus de LP, et plus de bloc
+« Sur quoi progresser ». Le reste du cockpit s'affichait normalement, games et couleurs
+comprises.
+
+**Une seule cause pour les deux symptômes : la dev key avait expiré.** Confirmé en une
+requête, sans toucher au code :
+
+```
+{"error":"Riot API 401 ... {\"message\":\"Unknown apikey\",\"status_code\":401}"}
+```
+
+**L'enchaînement, qui est le vrai truc à retenir.** Une clé morte ne fait pas que retirer
+le badge de rang : `res.ok` est faux → `currentRank` reste `null` → le palier de référence
+retombe sur le **`former_rank` saisi à l'onboarding**
+([suivi/page.tsx:152](app/suivi/page.tsx#L152)). Si ce `former_rank` est un palier sans
+contenu écrit, les recommandations disparaissent **aussi**, sans le moindre message.
+Deux symptômes très différents, une seule panne. À se rappeler avant de chercher deux bugs.
+
+Vraie valeur une fois la nouvelle clé posée dans `.env.local` : `PLATINUM I, 22 LP`. Victor
+est donc **platine**, pas diamant — le contenu platine existe, tout est revenu. À noter :
+**Next relit `.env.local` tout seul**, aucun redémarrage du serveur n'a été nécessaire.
+
+**Décision de Victor sur les paliers/rôles sans contenu** (prise ce jour, « pour le
+moment ») : plutôt que de retomber sur le générique, on **emprunte** le contenu écrit le
+plus proche — émeraude pour diamant → challenger, et le mid du même palier pour les quatre
+autres rôles. Mais **les recommandations ne s'empruntent pas** : le bloc affiche
+« Pas encore développé pour ton palier et ton rôle ». Les questions d'erreurs et la
+surbrillance, elles, sont bien servies.
+
+Conséquence visible : le bloc « Sur quoi progresser » **ne disparaît plus jamais**. Avant,
+`{!content.inDevelopment && ...}` le faisait s'évanouir sans explication sur `/` et
+`/suivi` ; il est maintenant toujours rendu, avec l'avertissement à la place du contenu
+(c'est déjà ce que faisait `/onboarding`). Mécanique : une table `CONTENT_TIER` dans
+[mid.ts](lib/content/mid.ts), et `getContent` renvoie `{ ...written, inDevelopment: true }`
+quand le contenu est emprunté — le contenu écrit n'est jamais muté au passage.
+
+**Réserve à surveiller :** les questions empruntées sont rédigées pour le mid. Elles sont
+globalement neutres (« Es-tu mort en lane ? Pourquoi ? »), mais les `focusPoints` d'où elles
+viennent parlent de 2v2 mid-jungle et d'aram mid. Si un joueur support trouve ça à côté de
+la plaque, c'est le premier endroit où regarder.
+
+**Vérifications :** `tsc --noEmit` OK, et **41 assertions** sur le vrai `getContent` exécuté
+via Node 24 (les 6 paliers mid intacts, l'emprunt d'émeraude pour les 4 paliers du haut,
+les 4 rôles, `unranked` qui retombe bien sur le générique, et la non-mutation du contenu
+écrit) — toutes vertes. `npm run build` **pas encore lancé** : le serveur de dev tournait,
+on ne fait pas les deux en même temps vu l'historique de `.next`.
+
+
 ### 2026-08-13 (1) — « Lance l'app » figeait le PC : cache Turbopack corrompu
 
 Trois crashs machine sur l'instruction « lance l'app » les 12 et 13/08, dont **un pendant

@@ -29,7 +29,9 @@ import {
   weightedDeaths10,
   DEATHS_EXPLANATION,
 } from "@/lib/stats";
+import { AdminKeyButton } from "../_components/AdminKeyButton";
 import { AnalysisPanel } from "../_components/AnalysisPanel";
+import { FeedbackButton } from "../_components/FeedbackButton";
 
 // Les champs venant de l'import Riot sont en lecture seule ici : seuls les
 // trois listes d'erreurs et le résumé sont saisis par le joueur (Slice 4).
@@ -323,19 +325,31 @@ export default function SuiviPage() {
                 setSwitchOpen((open) => !open);
                 setSwitchError(null);
               }}
-              className="rounded-full border border-slate-700 px-4 py-1.5 text-sm text-slate-300 hover:bg-slate-800"
+              className="rounded-full bg-red-600 px-4 py-1.5 text-sm font-semibold text-white hover:bg-red-500"
             >
-              Changer de profil
+              Synchroniser avec un autre compte
             </button>
 
             <div className="flex flex-col items-end gap-2 text-sm text-slate-400">
               {userEmail && <span>{userEmail}</span>}
-              <button
-                onClick={handleLogout}
-                className="rounded border border-slate-700 px-3 py-1 hover:bg-slate-800"
-              >
-                Se déconnecter
-              </button>
+              {/* Le coin haut droit est déjà pris ici : la pastille flottante
+                  du layout y recouvrait l'email, puis la carte de profil. Sur
+                  cette page seule, le bouton de retour rentre donc dans le
+                  flux, à gauche de la déconnexion et dans le même style.
+                  `FeedbackButton` s'efface tout seul en flottant sur /suivi
+                  (cf. PAGES_INLINE), il n'y en a jamais deux. */}
+              <div className="flex items-center gap-2">
+                {/* Ne rend rien pour les autres comptes. Le vrai contrôle
+                    d'accès est côté serveur, dans la route. */}
+                <AdminKeyButton email={userEmail} />
+                <FeedbackButton variant="inline" />
+                <button
+                  onClick={handleLogout}
+                  className="rounded border border-slate-700 px-3 py-1 hover:bg-slate-800"
+                >
+                  Se déconnecter
+                </button>
+              </div>
             </div>
           </div>
 
@@ -577,35 +591,63 @@ function GamesTable({
     // horizontalement au lieu de déformer la page. Ce n'est PAS une adaptation
     // mobile — elle reste à faire.
     <div className="min-w-0 overflow-x-auto rounded-2xl border border-slate-700">
-      <table className="w-full min-w-[1150px] border-collapse">
+      {/* `table-fixed` et non le `auto` par défaut : en auto, la largeur d'une
+          colonne suit son CONTENU, donc les trois colonnes de questions
+          finissent inégales dès qu'une réponse est plus longue que les autres —
+          et elles bougent à chaque frappe. En fixed, les largeurs posées sur les
+          en-têtes font foi, l'espace restant se répartit proportionnellement, et
+          les trois colonnes restent identiques quoi qu'on y écrive.
+          Contrepartie assumée : un en-tête long passe à la ligne au lieu
+          d'élargir sa colonne. C'est ce que Victor a demandé.
+          Somme des largeurs = 1212 px. À 1600 px de fenêtre il reste 1226 px
+          une fois retirés le `p-4` du main (32), le panneau d'analyse (300),
+          la gouttière (24) et la barre de défilement verticale (18) — c'est
+          cette dernière qui manquait au premier calcul et faisait déborder le
+          tableau de 7 px. Mesuré à 1224 px de rendu réel, sans défilement. */}
+      <table className="w-full min-w-[1212px] table-fixed border-collapse">
         {/* C'est l'EN-TÊTE qui signale ce que le palier demande de travailler :
             l'information est la même pour toutes les games, elle n'a donc rien
             à faire répétée sur chaque ligne. Les cellules, elles, ne clignotent
             que sur une valeur rouge (cf. GameRow). */}
         <thead className="sticky top-0 z-10">
           <tr>
-            <th className={HEAD + " w-[160px]"}>Matchup</th>
+            <th className={HEAD + " w-[210px]"}>Matchup</th>
             <th className={HEAD + " w-[70px] text-center"}>V/D</th>
-            <th className={HEAD + " w-[80px] text-center" + highlightClass(content, "csPre20")}>
+            {/* Colonnes chiffrées resserrées de quelques pixels : elles
+                n'affichent qu'un nombre à une décimale, et c'est le seul
+                endroit où prendre les pixels rendus à la colonne Matchup sans
+                toucher aux trois questions ni à la conclusion. Les intitulés
+                se replient, ce qui ne coûte rien : ils sont identiques sur
+                toutes les lignes. */}
+            <th className={HEAD + " w-[74px] text-center" + highlightClass(content, "csPre20")}>
               CS/20min
             </th>
-            <th className={HEAD + " w-[88px] text-center" + highlightClass(content, "csPost20")}>
+            <th className={HEAD + " w-[80px] text-center" + highlightClass(content, "csPost20")}>
               CS après 20min
             </th>
-            <th className={HEAD + " w-[84px] text-center" + highlightClass(content, "deaths10")}>
+            <th className={HEAD + " w-[78px] text-center" + highlightClass(content, "deaths10")}>
               Morts/10min
             </th>
-            {/* Les intitulés viennent du palier : jamais écrits en dur. */}
-            <th className={HEAD + highlightFieldClass(content, "lane")}>
+            {/* Les intitulés viennent du palier : jamais écrits en dur.
+                Les trois portent la MÊME largeur, posée explicitement : les
+                trois questions se valent, rien ne justifierait qu'une colonne
+                soit plus étroite parce que son libellé est plus court. */}
+            <th className={HEAD + " w-[175px]" + highlightFieldClass(content, "lane")}>
               {content.fieldQuestions.lane}
             </th>
-            <th className={HEAD + highlightFieldClass(content, "macro")}>
+            <th className={HEAD + " w-[175px]" + highlightFieldClass(content, "macro")}>
               {content.fieldQuestions.macro}
             </th>
-            <th className={HEAD + highlightFieldClass(content, "fight")}>
+            <th className={HEAD + " w-[175px]" + highlightFieldClass(content, "fight")}>
               {content.fieldQuestions.fight}
             </th>
-            <th className={HEAD + " w-[190px]"}>Résumé / Conclusion</th>
+            {/* Même largeur que les trois questions. Elle était un cran plus
+                étroite (155 px) au nom de « une synthèse, pas une quatrième
+                question », mais à cette largeur l'intitulé ne tenait pas dans
+                la colonne chez Victor. Les 20 px manquants sont pris sur
+                Matchup, qui en avait de reste : deux icônes de 32 px, le « VS »
+                et un nom de champion qui se replie déjà. */}
+            <th className={HEAD + " w-[175px]"}>Résumé / Conclusion</th>
           </tr>
         </thead>
         <tbody>
@@ -689,12 +731,20 @@ function GameRow({
             </>
           )}
         </div>
-        <p className="mt-1 text-sm font-medium">
+        {/* Quatre lignes, du plus identifiant au plus circonstanciel : les
+            deux visages, puis leurs noms, puis le contexte de jeu, puis quand
+            et combien de temps. Les trois dernières étaient auparavant
+            tassées en deux lignes, dont une qui mêlait date, lane, file et
+            durée séparées par des points médians. */}
+        <p className="mt-1 text-sm font-medium break-words">
           {game.champion}
           {game.matchup && <span className="text-slate-500"> vs {game.matchup}</span>}
         </p>
+        <p className="text-[11px] text-slate-400">
+          {[game.lane, game.queue].filter(Boolean).join(" · ")}
+        </p>
         <p className="text-[11px] text-slate-500">
-          {[formatGameDate(game.played_at), game.lane, game.queue, formatDuration(game.game_duration_seconds)]
+          {[formatGameDate(game.played_at), formatDuration(game.game_duration_seconds)]
             .filter(Boolean)
             .join(" · ")}
         </p>

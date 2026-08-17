@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { RANKED_TIERS, thresholdsOf } from "@/lib/content";
+import { deathsBand } from "@/lib/stats";
 
 describe("thresholdsOf", () => {
   // Choix structurant : sans palier connu, ni couleur ni bandeau.
@@ -22,27 +23,66 @@ describe("thresholdsOf", () => {
     }
   });
 
-  // Garde-fou de non-regression du 2026-08-11 : les paliers dont le CS/min
-  // avant 20 min n'a pas ete recalibre doivent garder EXACTEMENT le
-  // comportement d'avant (ancienne cible en vert, ratio de 85 % en jaune).
-  // Si ces valeurs changent, des games changent de couleur.
-  it("conserve les seuils avant-20 non recalibres", () => {
-    expect(thresholdsOf("bronze")?.csPre20).toEqual({ green: 7.5, yellow: 6.375 });
-    expect(thresholdsOf("silver")?.csPre20).toEqual({ green: 7.5, yellow: 6.375 });
-    expect(thresholdsOf("gold")?.csPre20).toEqual({ green: 8, yellow: 6.8 });
-    expect(thresholdsOf("platinum")?.csPre20).toEqual({ green: 8, yellow: 6.8 });
+  // La table dictee par Victor le 2026-08-17, palier par palier. Ces valeurs
+  // decident directement de la couleur de chaque case : elles sont reprises
+  // telles quelles ici pour qu'une modification involontaire se voie.
+  it("applique la table de farm avant 20 min", () => {
+    expect(thresholdsOf("iron")?.csPre20).toEqual({ great: 7.5, good: 6, warn: 5.5 });
+    expect(thresholdsOf("bronze")?.csPre20).toEqual({ great: 7.5, good: 7, warn: 6 });
+    expect(thresholdsOf("silver")?.csPre20).toEqual({ great: 7.5, good: 7, warn: 6.5 });
+    expect(thresholdsOf("gold")?.csPre20).toEqual({ great: 8, good: 7, warn: 6.5 });
+    expect(thresholdsOf("platinum")?.csPre20).toEqual({ great: 8.5, good: 7, warn: 6.5 });
+    expect(thresholdsOf("emerald")?.csPre20).toEqual({ great: 8.5, good: 7.5, warn: 6.5 });
   });
 
-  it("iron a ses propres seuils, les plus bas", () => {
-    expect(thresholdsOf("iron")?.csPre20).toEqual({ green: 7, yellow: 5.5 });
-    expect(thresholdsOf("iron")?.csPost20).toEqual({ green: 6, yellow: 5 });
+  it("applique la table de farm apres 20 min", () => {
+    expect(thresholdsOf("iron")?.csPost20).toEqual({ great: 7, good: 6, warn: 5 });
+    expect(thresholdsOf("bronze")?.csPost20).toEqual({ great: 7, good: 6, warn: 5 });
+    expect(thresholdsOf("silver")?.csPost20).toEqual({ great: 7.5, good: 6.5, warn: 6 });
+    expect(thresholdsOf("gold")?.csPost20).toEqual({ great: 7.5, good: 6.5, warn: 6 });
+    // Platine -> challenger partagent le meme farm apres 20 min.
+    for (const tier of ["platinum", "emerald", "challenger"] as const) {
+      expect(thresholdsOf(tier)?.csPost20, `palier ${tier}`).toEqual({ great: 8, good: 7, warn: 6 });
+    }
   });
 
-  // Le seuil vert des morts est le meme partout : c'est un objectif, pas une
-  // moyenne de palier (choix assume, note dans MEMOIRE.md).
-  it("vise 1.0 mort/10 min en vert a tous les paliers", () => {
+  it("applique la table des morts", () => {
+    expect(thresholdsOf("iron")?.deaths10).toEqual({ great: 1, good: 2, warn: 3 });
+    expect(thresholdsOf("bronze")?.deaths10).toEqual({ great: 1, good: 2, warn: 3 });
+    expect(thresholdsOf("silver")?.deaths10).toEqual({ great: 1, good: 2, warn: 2.5 });
+    expect(thresholdsOf("gold")?.deaths10).toEqual({ great: 1, good: 2, warn: 2.5 });
+    expect(thresholdsOf("platinum")?.deaths10).toEqual({ great: 1, good: 2, warn: 2.5 });
+    expect(thresholdsOf("emerald")?.deaths10).toEqual({ great: 0.5, good: 1.75, warn: 2.5 });
+  });
+
+  // La grille de depart laissait la zone 0.5 - 1 sans bande sur les paliers
+  // hauts. Victor l'a tranchee dans les deux sens, differemment :
+  //   - platine : le vert FONCE remonte a 1, donc 0.8 est vert fonce ;
+  //   - emeraude et au-dessus : le vert PALE descend a 0.5, donc 0.8 est vert
+  //     pale.
+  // Les deux sont des decisions, pas des restes. Ce test les fige toutes deux
+  // parce qu'un seul chiffre deplace ferait silencieusement reapparaitre le
+  // trou, sans qu'aucune autre assertion ne s'en apercoive.
+  it("ne laisse aucun rythme de morts sans bande sur les paliers hauts", () => {
+    for (const v of [0.4, 0.5, 0.8, 1, 1.1]) {
+      for (const tier of ["platinum", "emerald", "challenger"] as const) {
+        const band = deathsBand(v, thresholdsOf(tier)!.deaths10);
+        expect(band, `${v} morts en ${tier}`).not.toBe("unknown");
+      }
+    }
+    expect(deathsBand(0.8, thresholdsOf("platinum")!.deaths10)).toBe("great");
+    expect(deathsBand(0.8, thresholdsOf("emerald")!.deaths10)).toBe("good");
+  });
+
+  // Les deux bandes vertes doivent SE TOUCHER : le vert fonce s'arrete pile ou
+  // le vert pale commence. C'est ce qui garantit l'absence de trou, quelle que
+  // soit la valeur testee.
+  it("fait se toucher le vert fonce et le vert pale sur les morts", () => {
     for (const tier of RANKED_TIERS) {
-      expect(thresholdsOf(tier)?.deaths10.green, `palier ${tier}`).toBe(1);
+      const morts = thresholdsOf(tier)!.deaths10;
+      const juste_au_dessus = morts.great + 0.01;
+      expect(deathsBand(morts.great, morts), `${tier} au seuil`).toBe("great");
+      expect(deathsBand(juste_au_dessus, morts), `${tier} juste au-dessus`).toBe("good");
     }
   });
 
@@ -56,15 +96,32 @@ describe("thresholdsOf", () => {
     expect(thresholdsOf("emerald")?.maxChampions).toBe(5);
   });
 
-  // Un seuil jaune ne doit jamais etre plus exigeant que le vert, sinon la
-  // bande jaune serait vide ou inversee.
-  it("garde toujours jaune moins exigeant que vert", () => {
+  // Les quatre bandes doivent rester ordonnees, sinon l'une d'elles est vide
+  // et une couleur devient inatteignable.
+  //
+  // L'ordre NUMERIQUE s'inverse entre les deux familles de stats, et c'est
+  // exactement ce que ce test doit verifier : pour le farm il faut monter
+  // (warn < good < great), pour les morts il faut descendre
+  // (great < good < warn). Ecrire la meme assertion pour les trois — l'erreur
+  // faite en ecrivant ce test — laisserait passer une table inversee.
+  it("garde les quatre bandes du farm ordonnees, du jaune au vert fonce", () => {
     for (const tier of RANKED_TIERS) {
-      const t = thresholdsOf(tier);
-      expect(t!.csPre20.yellow, `csPre20 ${tier}`).toBeLessThan(t!.csPre20.green);
-      expect(t!.csPost20.yellow, `csPost20 ${tier}`).toBeLessThan(t!.csPost20.green);
-      // Morts : logique inversee, le jaune tolere PLUS de morts que le vert.
-      expect(t!.deaths10.yellow, `deaths10 ${tier}`).toBeGreaterThan(t!.deaths10.green);
+      const t = thresholdsOf(tier)!;
+      for (const [name, s] of [
+        ["csPre20", t.csPre20],
+        ["csPost20", t.csPost20],
+      ] as const) {
+        expect(s.warn, `${name} ${tier} : jaune < vert pale`).toBeLessThan(s.good);
+        expect(s.good, `${name} ${tier} : vert pale < vert fonce`).toBeLessThan(s.great);
+      }
+    }
+  });
+
+  it("garde les quatre bandes des morts ordonnees en sens inverse", () => {
+    for (const tier of RANKED_TIERS) {
+      const morts = thresholdsOf(tier)!.deaths10;
+      expect(morts.great, `deaths10 ${tier} : vert fonce < vert pale`).toBeLessThan(morts.good);
+      expect(morts.good, `deaths10 ${tier} : vert pale < jaune`).toBeLessThan(morts.warn);
     }
   });
 });

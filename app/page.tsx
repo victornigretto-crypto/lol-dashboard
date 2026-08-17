@@ -140,10 +140,12 @@ function winrateBanner(games: RiotGame[]): Banner | null {
   const wins = games.filter((g) => g.result === "Victoire").length;
   const winrate = (wins / games.length) * 100;
   const detail = `${Math.round(winrate)}% WR sur tes ${games.length} dernières SoloQ`;
-  if (winrate < 37) return { id: "winrate", severity: "red", text: "Alerte LooserQ : fais une pause de tes soloQ", detail };
-  if (winrate < 50) return { id: "winrate", severity: "yellow", text: "Winrate légèrement négatif: Attention !", detail };
-  if (winrate < 62) return { id: "winrate", severity: "green", text: "Winrate positif : continues comme ça", detail };
-  return { id: "winrate", severity: "green", text: "Tu es en train de smurf !", detail };
+  if (winrate < 37) return { id: "winrate", severity: "bad", text: "Alerte LooserQ : fais une pause de tes soloQ", detail };
+  if (winrate < 50) return { id: "winrate", severity: "warn", text: "Winrate légèrement négatif: Attention !", detail };
+  // Les deux zones vertes du winrate se distinguent maintenant à l'œil : le
+  // vert pâle pour "ça monte", le vert foncé pour le smurf.
+  if (winrate < 62) return { id: "winrate", severity: "good", text: "Bon winrate : Continues comme ça", detail };
+  return { id: "winrate", severity: "great", text: "Es-tu un smurf ?", detail };
 }
 
 // Les bandeaux de farm, de morts, de rôles et de pool de champions vivent dans

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   championPoolBanner,
   deathsBanner,
+  farmPost20Banner,
   farmPre20Banner,
   performanceBanners,
   rolesBanner,
@@ -13,7 +14,7 @@ import { thresholdsOf } from "@/lib/content";
 
 const PLATINUM = thresholdsOf("platinum");
 
-// Une game "neutre" : Mid, SoloQ, 30 min, farm et morts au niveau du vert
+// Une game "neutre" : Mid, SoloQ, 30 min, farm et morts confortables au palier
 // platine. Chaque test ne surcharge que ce qu'il veut eprouver.
 const game = (over: Partial<BannerGame> = {}): BannerGame => ({
   cs20: 180,
@@ -36,32 +37,68 @@ const banner = (id: string, severity: Banner["severity"]): Banner => ({
 });
 
 describe("sortBanners", () => {
-  // Ordre demande par Victor le 2026-08-11 : le vert d'abord, le rouge en
-  // dernier (l'inverse de l'ordre d'origine).
-  it("classe vert, puis jaune, puis rouge", () => {
-    const sorted = sortBanners([banner("a", "red"), banner("b", "green"), banner("c", "yellow")]);
-    expect(sorted.map((b) => b.severity)).toEqual(["green", "yellow", "red"]);
+  // Ordre demande par Victor : le meilleur d'abord, le rouge en dernier.
+  it("classe vert fonce, vert pale, jaune, puis rouge", () => {
+    const sorted = sortBanners([
+      banner("a", "bad"),
+      banner("b", "good"),
+      banner("c", "warn"),
+      banner("d", "great"),
+    ]);
+    expect(sorted.map((b) => b.severity)).toEqual(["great", "good", "warn", "bad"]);
   });
 
   // Le tri doit rester stable : / et /suivi alimentent la liste en plusieurs
   // fois, l'ordre d'ajout doit survivre a severite egale.
   it("garde l'ordre d'ajout a severite egale", () => {
-    const sorted = sortBanners([banner("a", "red"), banner("b", "red"), banner("c", "red")]);
+    const sorted = sortBanners([banner("a", "bad"), banner("b", "bad"), banner("c", "bad")]);
     expect(sorted.map((b) => b.id)).toEqual(["a", "b", "c"]);
   });
 
   it("ne modifie pas la liste d'origine", () => {
-    const input = [banner("a", "red"), banner("b", "green")];
+    const input = [banner("a", "bad"), banner("b", "great")];
     sortBanners(input);
     expect(input.map((b) => b.id)).toEqual(["a", "b"]);
+  });
+
+  // Un bandeau epingle passe AVANT le tri par severite : c'est tout l'interet,
+  // sans quoi un bandeau rouge finirait en bas, derriere les verts.
+  it("place un bandeau epingle avant tout le reste, verts compris", () => {
+    const sorted = sortBanners([
+      banner("vert", "great"),
+      banner("jaune", "warn"),
+      { ...banner("epingle", "bad"), pinned: true },
+    ]);
+    expect(sorted.map((b) => b.id)).toEqual(["epingle", "vert", "jaune"]);
   });
 });
 
 describe("farmPre20Banner", () => {
-  it("juge le farm face au seuil du palier", () => {
-    expect(farmPre20Banner([game({ cs20: 180 })], PLATINUM)?.severity).toBe("green");
-    expect(farmPre20Banner([game({ cs20: 145 })], PLATINUM)?.severity).toBe("yellow");
-    expect(farmPre20Banner([game({ cs20: 120 })], PLATINUM)?.severity).toBe("red");
+  // Seuils platine : vert fonce a 8.5 CS/min, vert pale a 7, jaune a 6.5.
+  it("juge le farm sur les quatre bandes du palier", () => {
+    expect(farmPre20Banner([game({ cs20: 180 })], PLATINUM)?.text).toBe("Très bon farm en lane");
+    expect(farmPre20Banner([game({ cs20: 155 })], PLATINUM)?.text).toBe("Bon farm en lane");
+    expect(farmPre20Banner([game({ cs20: 138 })], PLATINUM)?.text).toBe("Manque de farm en lane");
+    expect(farmPre20Banner([game({ cs20: 120 })], PLATINUM)?.text).toBe("Gros manque de farm en lane");
+  });
+
+  // Choix du 2026-08-17 : le detail parle en CS TOTAUX a 20 min, pas en
+  // CS/min — donc le seuil cite subit la meme conversion (7 -> 140). Citer
+  // 7 a cote de 120 comparerait deux unites differentes.
+  it("annonce la mesure et l'objectif dans la meme unite", () => {
+    const detail = farmPre20Banner([game({ cs20: 120 })], PLATINUM)!.detail;
+    expect(detail).toBe("120 CS à 20 mins en moyenne — insuffisant pour ton rank, tu dois viser au moins 140");
+  });
+
+  // L'objectif cite est le vert PALE, jamais le vert fonce : on donne le
+  // niveau attendu au palier, pas l'excellence.
+  it("cite le vert pale comme objectif, meme en jaune", () => {
+    expect(farmPre20Banner([game({ cs20: 138 })], PLATINUM)?.detail).toContain("au moins 140");
+  });
+
+  it("ne cite aucun objectif quand la bande est deja verte", () => {
+    expect(farmPre20Banner([game({ cs20: 155 })], PLATINUM)?.detail).toContain("correct pour ton rank");
+    expect(farmPre20Banner([game({ cs20: 180 })], PLATINUM)?.detail).toContain("excellent pour ton rank");
   });
 
   // Un jungler ou un support n'a pas a etre juge sur son CS/min : seules les
@@ -69,7 +106,7 @@ describe("farmPre20Banner", () => {
   it("exclut les lanes ou le farm n'est pas un indicateur", () => {
     const games = [game({ lane: "Mid", cs20: 180 }), game({ lane: "Jungle", cs20: 20 })];
     // Si la jungle comptait, la moyenne tomberait a 5.0 CS/min donc en rouge.
-    expect(farmPre20Banner(games, PLATINUM)?.severity).toBe("green");
+    expect(farmPre20Banner(games, PLATINUM)?.severity).toBe("great");
   });
 
   // Choix structurant : seuils inconnus -> on ne dit rien.
@@ -83,28 +120,54 @@ describe("farmPre20Banner", () => {
   });
 });
 
-describe("deathsBanner", () => {
-  it("annonce un joueur safe ou trop de morts", () => {
-    expect(deathsBanner([game({ deaths10: 0.7 })], PLATINUM)?.text).toBe("Joueur safe");
-    expect(deathsBanner([game({ deaths10: 2 })], PLATINUM)?.text).toBe("Trop de morts");
+describe("farmPost20Banner", () => {
+  // Le side lane reste en CS/min : c'est un rythme sur une duree variable, un
+  // total n'y voudrait rien dire.
+  it("reste en CS/min, contrairement a l'avant-20", () => {
+    const detail = farmPost20Banner([game({ cs_final: 245 })], PLATINUM)!.detail;
+    expect(detail).toBe("6.5 CS/min après 20mins en moyenne — faible pour ton rank, tu dois viser au moins 7");
   });
 
-  // Demande explicite : le jaune ne dit rien d'actionnable sur les morts, donc
-  // aucun bandeau. Ce n'est pas un oubli.
-  it("n'affiche rien en jaune", () => {
-    expect(deathsBanner([game({ deaths10: 1.3 })], PLATINUM)).toBeNull();
+  // Une game de moins de 25 min n'a pas de valeur apres-20 : elle sort de la
+  // moyenne, et s'il n'en reste aucune le bandeau disparait.
+  it("ne dit rien quand aucune game ne dure assez", () => {
+    expect(farmPost20Banner([game({ game_duration_seconds: 1400 })], PLATINUM)).toBeNull();
+  });
+});
+
+describe("deathsBanner", () => {
+  // Seuils platine : vert fonce sous 1, vert pale sous 2, jaune sous 2.5.
+  it("nomme les quatre bandes", () => {
+    expect(deathsBanner([game({ deaths10: 0.4 })], PLATINUM)?.text).toBe("Joueur intuable");
+    expect(deathsBanner([game({ deaths10: 1.4 })], PLATINUM)?.text).toBe("Joueur safe");
+    expect(deathsBanner([game({ deaths10: 2.3 })], PLATINUM)?.text).toBe("Un peu trop de morts");
+    expect(deathsBanner([game({ deaths10: 3.5 })], PLATINUM)?.text).toBe("Beaucoup trop de morts");
+  });
+
+  // Le jaune etait auparavant masque sur les morts. Depuis le 2026-08-17 il a
+  // son propre libelle, donc il DOIT s'afficher.
+  it("affiche desormais le jaune", () => {
+    expect(deathsBanner([game({ deaths10: 2.3 })], PLATINUM)?.severity).toBe("warn");
+  });
+
+  // Sur les morts, progresser c'est DESCENDRE : le verdict doit dire "moins
+  // de", jamais "au moins", qui conseillerait l'inverse de l'objectif.
+  it("inverse le sens du conseil", () => {
+    const detail = deathsBanner([game({ deaths10: 3.5 })], PLATINUM)!.detail;
+    expect(detail).toBe("3.5 morts/10mins en moyenne — insuffisant pour ton rank, tu dois viser moins de 2");
+    expect(detail).not.toContain("au moins");
   });
 
   // Le bandeau doit utiliser le rythme PONDERE, comme la couleur de la
   // colonne. Meme game, seule la duree change : a 25 min rien n'est pondere
-  // (rouge), a 35 min les morts tardives comptent a moitie et la font sortir
-  // du rouge.
+  // (jaune), a 35 min les morts tardives comptent a moitie et la font passer
+  // en vert pale.
   it("juge sur le rythme pondere, pas sur le rythme brut", () => {
-    const brut = game({ deaths10: 1.7, deaths: 6, deaths_last5: 4, game_duration_seconds: 1500 });
-    expect(deathsBanner([brut], PLATINUM)?.severity).toBe("red");
+    const brut = game({ deaths10: 2.3, deaths: 8, deaths_last5: 4, game_duration_seconds: 1500 });
+    expect(deathsBanner([brut], PLATINUM)?.severity).toBe("warn");
 
-    const pondere = game({ deaths10: 1.7, deaths: 6, deaths_last5: 4, game_duration_seconds: 2100 });
-    expect(deathsBanner([pondere], PLATINUM)).toBeNull();
+    const pondere = game({ deaths10: 2.3, deaths: 8, deaths_last5: 4, game_duration_seconds: 2100 });
+    expect(deathsBanner([pondere], PLATINUM)?.severity).toBe("good");
   });
 
   it("ne dit rien sans seuils ni sans games", () => {
@@ -118,8 +181,20 @@ describe("rolesBanner", () => {
 
   it("alerte a partir de 4 roles differents", () => {
     const four = roles.slice(0, 4).map((lane) => game({ lane }));
-    expect(rolesBanner(four)?.severity).toBe("red");
+    expect(rolesBanner(four)?.severity).toBe("bad");
     expect(rolesBanner(four)?.detail).toContain("4 rôles");
+  });
+
+  // Demande de Victor : c'est le constat le plus important, il doit etre en
+  // tete meme quand tous les autres bandeaux sont verts.
+  it("remonte en tete de liste, devant les bandeaux verts", () => {
+    const games = [
+      game({ lane: "Mid", cs20: 180 }),
+      game({ lane: "Top", cs20: 180 }),
+      game({ lane: "Jungle" }),
+      game({ lane: "Support" }),
+    ];
+    expect(performanceBanners(games, PLATINUM)[0].id).toBe("roles");
   });
 
   it("ne dit rien en dessous de 4 roles", () => {
@@ -150,12 +225,12 @@ describe("championPoolBanner", () => {
   it("declenche strictement au-dela du nombre tolere", () => {
     expect(championPoolBanner(withChampions(["a", "b", "c", "d", "e"]), PLATINUM)).toBeNull();
     expect(championPoolBanner(withChampions(["a", "b", "c", "d", "e", "f"]), PLATINUM)?.severity).toBe(
-      "red"
+      "bad"
     );
   });
 
-  // Le pool se compte PAR ROLE : 3 champions en mid et 3 en top, c'est un
-  // joueur concentre sur chacun de ses roles.
+  // Le pool se compte PAR ROLE, pas sur l'ensemble des games : 3 champions en
+  // mid et 3 en top, c'est un joueur concentre sur chacun de ses roles.
   it("compte le pool par role et non sur l'ensemble", () => {
     const games = [
       ...withChampions(["a", "b", "c"], { lane: "Mid" }),
@@ -164,12 +239,16 @@ describe("championPoolBanner", () => {
     expect(championPoolBanner(games, PLATINUM)).toBeNull();
   });
 
-  it("nomme le role qui a declenche", () => {
+  // Le chiffre annonce est celui du role le plus charge — celui qui a
+  // declenche — et pas le total tous roles confondus (ici 7).
+  it("annonce le pool du role qui a declenche", () => {
     const games = [
       ...withChampions(["a", "b", "c", "d", "e", "f"], { lane: "Top" }),
       ...withChampions(["g"], { lane: "Mid" }),
     ];
-    expect(championPoolBanner(games, PLATINUM)?.detail).toContain("Top");
+    expect(championPoolBanner(games, PLATINUM)?.detail).toBe(
+      "Tu as joué 6 champions sur tes 7 dernières parties. Concentres toi sur moins de 5 champions pour progresser"
+    );
   });
 
   it("ignore les games hors SoloQ et n'a rien a dire sans seuils", () => {
@@ -180,20 +259,26 @@ describe("championPoolBanner", () => {
 });
 
 describe("performanceBanners", () => {
-  it("rend les bandeaux deja tries du vert au rouge", () => {
-    // Bon farm (vert) + 4 roles (rouge) sur le meme echantillon.
+  it("rend les bandeaux deja tries du meilleur au rouge, epingles mis a part", () => {
+    // Bon farm (vert fonce) + 4 roles (rouge, epingle) sur le meme echantillon.
     const games = [
       game({ lane: "Mid", cs20: 180 }),
       game({ lane: "Top", cs20: 180 }),
       game({ lane: "Jungle" }),
       game({ lane: "Support" }),
     ];
-    const severities = performanceBanners(games, PLATINUM).map((b) => b.severity);
-    const rank = { green: 0, yellow: 1, red: 2 };
-    const values = severities.map((s) => rank[s]);
+    const banners = performanceBanners(games, PLATINUM);
+    expect(banners.map((b) => b.severity)).toContain("great");
+    expect(banners.map((b) => b.severity)).toContain("bad");
+
+    // Les epingles occupent le debut de la liste, sans exception.
+    const premierNonEpingle = banners.findIndex((b) => !b.pinned);
+    expect(banners.slice(0, premierNonEpingle).every((b) => b.pinned)).toBe(true);
+
+    // Et la suite reste triee du meilleur au pire.
+    const rank = { great: 0, good: 1, warn: 2, bad: 3 };
+    const values = banners.slice(premierNonEpingle).map((b) => rank[b.severity]);
     expect(values).toEqual([...values].sort((a, b) => a - b));
-    expect(severities).toContain("green");
-    expect(severities).toContain("red");
   });
 
   it("ne rend aucun bandeau dependant du palier sans seuils", () => {

@@ -48,11 +48,16 @@ export async function updateSession(request: NextRequest) {
   // handler, pas une page — une redirection HTML ici casserait le fetch()
   // côté client). /api/profile/link reste protégée : elle écrit sur LE
   // profil d'un user connecté, pas de sens pour un visiteur anonyme.
+  // /api/feedback doit rester publique pour la meme raison que l'import : le
+  // bouton de retour est sur TOUS les ecrans, y compris l'accueil ou personne
+  // n'est connecte. Sans cette ligne, le fetch() du navigateur recevrait une
+  // redirection HTML vers /login et l'envoi echouerait sans explication.
   const isPublicRoute =
     request.nextUrl.pathname === "/" ||
     request.nextUrl.pathname.startsWith("/decouvrir") ||
     request.nextUrl.pathname.startsWith("/rejoindre") ||
-    request.nextUrl.pathname.startsWith("/api/riot/import");
+    request.nextUrl.pathname.startsWith("/api/riot/import") ||
+    request.nextUrl.pathname.startsWith("/api/feedback");
 
   if (!user && !isLoginRoute && !isAuthRoute && !isResetPasswordRoute && !isPublicRoute) {
     const url = request.nextUrl.clone();

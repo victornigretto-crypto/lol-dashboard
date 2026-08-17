@@ -1,6 +1,12 @@
-// Client serveur pour l'API Riot Games. RIOT_API_KEY n'est jamais exposée au
+// Client serveur pour l'API Riot Games. La clé n'est jamais exposée au
 // navigateur : ce module ne doit être importé que depuis du code serveur
 // (route handlers, server components).
+//
+// La clé vient de la BASE en priorité (remplaçable depuis /suivi par le compte
+// administrateur), de `RIOT_API_KEY` à défaut. En dev key elle expire toutes
+// les 24 h : c'est précisément ce que l'écran d'administration évite d'aller
+// corriger à la main dans .env.local.
+import { cleRiot } from "@/lib/settings";
 
 // Match-V5 / Account-V1 sont routés par continent, League-V4 (classement)
 // est routé par plateforme (le serveur de jeu, ex: euw1).
@@ -14,9 +20,14 @@ function sleep(ms: number) {
 const MAX_RETRIES = 5;
 
 async function riotFetch<T>(host: string, path: string, attempt = 0): Promise<T> {
-  const apiKey = process.env.RIOT_API_KEY;
+  // `cleRiot()` garde la valeur en mémoire une trentaine de secondes : un seul
+  // import déclenche une quarantaine d'appels ici, il n'est pas question
+  // d'interroger la base à chacun.
+  const apiKey = await cleRiot();
   if (!apiKey) {
-    throw new Error("RIOT_API_KEY manquante dans .env.local");
+    throw new Error(
+      "Aucune clé Riot : ni enregistrée dans l'application, ni dans RIOT_API_KEY (.env.local)."
+    );
   }
 
   const res = await fetch(`https://${host}${path}`, {

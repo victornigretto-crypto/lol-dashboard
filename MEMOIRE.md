@@ -51,6 +51,12 @@ gratuite et sans compte ; le suivi dans la durée demande un compte.
 **Stack :** Next.js 16.2.12 (App Router) · React 19.2.4 · Tailwind 4 · Supabase
 (auth + Postgres) · API Riot Games (dev key, EUW en dur) · **Vitest** pour les tests.
 
+**En production : <https://gg-dashboard-lol.vercel.app>** — projet Vercel `gg-dashboard`
+(scope `nigretto`), un seul alias. `gg-dashboard.vercel.app` **tout court est pris par un
+tiers**, ne pas repartir le chercher. Un domaine `.vercel.app` n'est public que s'il est
+**enregistré sur le projet** (`vercel domains add`) : la protection du projet est réglée sur
+`all_except_custom_domains`, tout le reste part en 302 vers le SSO Vercel.
+
 > ### Le cockpit est un tableau depuis le 2026-08-17
 > `/suivi` n'affiche plus des cartes mais un **tableau type tableur** : 9 colonnes
 > (matchup · V/D · CS/20min · CS après 20min · morts/10min · les 3 questions du palier ·
@@ -62,6 +68,16 @@ gratuite et sans compte ; le suivi dans la durée demande un compte.
 > **Signalement, deux niveaux à ne pas confondre :** l'**en-tête** porte un contour bleu
 > **fixe** = ce que ton palier doit travailler ; la **cellule** **clignote** uniquement si
 > le palier surveille cette stat **ET** qu'elle est rouge.
+
+> ### Quatre bandes de couleur depuis le 2026-08-17
+> Rouge `#e7000b` · jaune `#f0b100` · **vert pâle `#05df72`** · **vert foncé `#008236`**,
+> plus le gris `#1d293d` pour « seuils inconnus ». Un seuil s'écrit `{great, good, warn}`
+> et l'ordre numérique **s'inverse** entre le farm (on monte) et les morts (on descend) —
+> c'est le sens de la comparaison qui change, pas la table.
+> **Une seule table de couleurs** (`BAND_CLASS` dans [lib/stats.ts](lib/stats.ts)) : les
+> bandeaux en dérivent, ils n'en ont plus de copie.
+> L'objectif cité dans un détail de bandeau est **toujours le vert pâle**, jamais le vert
+> foncé : on donne le niveau attendu au palier, pas l'excellence.
 
 > ### Le cache partagé de parties (2026-08-16)
 > `match_facts` cache les faits d'une partie par `(riot_match_id, puuid)`, **hors de tout
@@ -102,7 +118,7 @@ gratuite et sans compte ; le suivi dans la durée demande un compte.
 **Ce qui marche, vérifié en session :** import Riot de bout en bout (compte → 20 games →
 rang), cache en base, garde-fou anti-pollution, auth Supabase complète (login / signup /
 reset / confirmation), les couleurs relatives au palier. `tsc --noEmit`, `npm run test`
-(97 assertions) et `npm run build` passent.
+(105 assertions) et `npm run build` passent.
 
 **Le contenu pédagogique a été entièrement réécrit par Victor le 2026-08-17** pour les
 6 paliers écrits (iron → emerald) : intro, points de progression, et les 3 questions.
@@ -129,216 +145,148 @@ même sans contenu écrit.
 
 ## Journal des sessions
 
-### 2026-08-17 — Cockpit en tableau, contenu des 6 paliers, outillage de test
+### 2026-08-17 (5) — URL de production en `gg-dashboard`, colonne conclusion élargie
 
-**Contexte** — suite de la même session que l'entrée du 2026-08-16 : parcours public,
-puis refonte du cockpit et rédaction du contenu pédagogique.
+**Contexte** — l'URL Vercel portait encore `lol-dashboard`, et « Résumé / Conclusion » ne
+tenait pas dans sa colonne du cockpit.
 
 **Changé**
-- Outillage : **Vitest** installé (`npm run test` / `test:watch`), **97 assertions** sur
-  `lib/`. Definition of done dans [CLAUDE.md](CLAUDE.md) + garde-fous (rien à l'échelle
-  système sur cette machine, rien de destructif sans demande).
-- MEMOIRE.md borné à 3 entrées, le reste dans [MEMOIRE_ARCHIVE.md](MEMOIRE_ARCHIVE.md).
-  `supabase/migrations/` créé avec sa convention.
-- Parcours public : bandeau bleu **« Me connecter pour analyser ma progression »** sur `/`
-  et sur l'écran de résultat ; déconnexion vers `/` ; « Continuer sans se connecter » sur
-  `/login` ; le mot « gratuite » retiré de l'UI.
-- `/suivi` : les cartes deviennent un **tableau type tableur** (9 colonnes, hauteur de
-  ligne variable, saisie dans la cellule, réponses multiples conservées). Conteneur élargi
-  à **1600 px** — choix de Victor contre l'alternative du panneau d'analyse repliable.
-- **Contenu réécrit pour les 6 paliers** (intro, points, 3 questions) + nouveau
-  `highlightFields` pour mettre une question en avant, pas seulement une stat.
-- Signalement : **contour bleu fixe sur l'en-tête** (ce que le palier travaille),
-  **clignotement sur la cellule** seulement si le palier surveille la stat ET qu'elle est
-  rouge.
+- **Projet Vercel renommé `lol-dashboard` → `gg-dashboard`.** URL publique :
+  **https://gg-dashboard-lol.vercel.app**. `gg-dashboard.vercel.app` tout court est **pris
+  par un tiers** (HTTP 200, contenu étranger) — d'où le suffixe. Le renommage **ne suffit
+  pas** : Vercel ne réattribue les URLs auto-générées qu'au prochain déploiement, il a fallu
+  `vercel alias set` **puis** `vercel domains add`. Sans ce dernier, la protection du projet
+  (`ssoProtection: all_except_custom_domains`) renvoyait **302 vers le SSO Vercel** : seul un
+  domaine *enregistré sur le projet* est public.
+- Les deux anciennes URLs (`lol-dashboard-three`, `lol-dashboard-nigretto`) **supprimées** sur
+  demande explicite de Victor. Il ne reste qu'un alias.
+- `/suivi` : Matchup **230 → 210 px**, Résumé / Conclusion **155 → 175 px** (désormais la même
+  largeur que les 3 questions, le commentaire qui justifiait 155 était devenu faux). **Somme
+  des colonnes inchangée à 1212 px** — y toucher fait déborder le cockpit.
 
-**Vérifié** — `tsc --noEmit`, `npm run test` (97), `npm run build` (13 pages) : les trois
-passent. Rendu et mesures (largeurs, hauteurs de ligne, contours) faits sur maquette servie
-avec le **CSS compilé de l'app**. **Non vérifié en conditions réelles** : `/suivi` exige une
-session, et l'accueil reste incapturable en headless.
+**Vérifié** — `tsc --noEmit`, `npm run test` (109), `npm run build` (15 routes) passent.
+URL de prod : **HTTP 200**, `<title>GG Dashboard</title>`. Clé Riot en base testée en direct
+contre l'API : `league-v4` renvoie **Platinum I, 54 LP, 23V/23D** → le rang a de quoi se
+synchroniser. **Non vérifié en conditions réelles** : la largeur de la colonne dans un
+navigateur, et le rang réellement affiché dans le cockpit.
 
-**Reste ouvert** — mobile hors périmètre (sous ~1510 px de viewport le tableau défile
-horizontalement) ; `bucketThemes` décrit encore l'ancien contenu et reste code mort.
+> ### Pourquoi « la clé est à jour » et le rang ne revenait pas
+> Deux causes qui se cumulent, et aucune ne se voyait :
+> `cleRiot()` lit **la base d'abord**, `RIOT_API_KEY` seulement en secours — éditer
+> `.env.local` ne change donc **rien** tant qu'une clé traîne dans `app_settings`.
+> Et [app/api/riot/import/route.ts:217](app/api/riot/import/route.ts#L217) fait
+> `.catch(() => [])` sur le rang : un **401 devient « pas de rang »**, sans erreur nulle part.
+> Les games, elles, s'affichent depuis Supabase — d'où l'impression que tout marche sauf le
+> rank. **La clé restée dans `.env.local` est toujours l'ancienne, expirée** : inoffensive
+> aujourd'hui, piège le jour où la base sera vidée.
 
-### 2026-08-16 — Le cache partagé : une recherche coûtait 86 appels Riot pour un quota de 100
+**Reste ouvert** — au prochain `vercel --prod`, Vercel **recréera**
+`gg-dashboard-nigretto.vercel.app` (nom du projet + scope) ; protégée par le SSO, donc non
+publique. Les *Redirect URLs* de Supabase Auth **n'ont pas été touchées** alors que les deux
+anciennes URLs sont mortes.
 
-**Le symptôme rapporté :** « il ne se passe rien quand j'appuie sur Entrée ». Il se passait
-quelque chose — le « ... » du bouton **est** l'indicateur de chargement
-([page.tsx:369](app/page.tsx#L369)) — mais la réponse mettait jusqu'à **3 minutes**. Le log
-du serveur montre l'emballement : `4.1s → 8.5s → 57s → 63s → 3.0min`.
 
-**La cause immédiate**, et le chiffre à retenir : **une seule recherche depuis l'accueil
-coûtait ~86 appels Riot, pour un quota de 100 par 2 minutes.** Le détail : `handleSubmit`
-appelle `search(riotId, "soloq")` (43 appels), **puis** `handleAnalyze` refait un import
-complet avec le filtre `ranked` (43 de plus) — et les deux listes se recouvrent largement,
-donc on retéléchargeait les mêmes parties 4 secondes après. Le log le confirme : les `POST
-/api/riot/import` arrivent **systématiquement par paires**. Victor ne pouvait donc pas
-faire deux recherches d'affilée sans saturer le quota ; ce n'était pas son comportement,
-c'était le premier clic.
+### 2026-08-17 (3) — Bouton « Rapporter un problème » sur tous les écrans
 
-**La cause profonde — personne ne possédait l'accès à Riot.** `lib/riot/client.ts` était un
-wrapper de transport (URL + clé + retry naïf). Combien d'appels, à quelle fréquence, mis en
-cache ou pas, annulable ou pas : chaque appelant décidait dans son coin, et **le budget
-global n'appartenait à personne**. Corollaire structurel : le seul cache existant était
-`games`, indexé par `(user_id, puuid)` — donc **l'analyse gratuite, le parcours de chaque
-visiteur, était le seul chemin sans aucun cache**, et c'est aussi celui qui faisait le
-travail en double.
+**Contexte** — Victor veut recevoir les retours des joueurs par email.
 
-**Ce qui a été livré : le cache partagé `match_facts`.** Une partie terminée est une donnée
-**publique et immuable** ; elle n'a rien à faire dans une table qui appartient à un user.
-Nouvelle table, clé `(riot_match_id, puuid)` — et pas `riot_match_id` seul, parce qu'une
-partie contient 10 joueurs dont les faits diffèrent. Deux joueurs de la même partie se
-partagent donc réellement le cache, chacun sur sa ligne : le bénéfice grandit avec le
-nombre d'utilisateurs, ce qui est la direction voulue par Victor (« potentiellement plus
-d'utilisateurs un jour »).
+**Changé**
+- `FeedbackButton` (client) posé **dans le layout racine**, donc présent partout sans
+  qu'aucune page ait à s'en occuper : bouton fixe en haut à droite + fenêtre modale
+  (bug / suggestion, texte libre, confirmation après envoi).
+- `app/api/feedback/route.ts` : **Resend appelé en `fetch` HTTPS, sans SDK** — décision de
+  Victor, `package.json` est resté **strictement inchangé**. Message vide refusé,
+  5000 caractères max, **honeypot** (champ hors écran ; s'il est rempli on répond un
+  succès ordinaire, pour ne rien apprendre au robot) et **3 envois par IP / 10 min**.
+- `/api/feedback` ajoutée aux routes publiques du proxy, comme `/api/riot/import` : sans
+  ça, le `fetch` d'un visiteur non connecté recevait une redirection HTML vers `/login`.
+- `RESEND_API_KEY` documentée dans [.env.local.example](.env.local.example).
 
-| | avant | après |
-|---|---|---|
-| recherche à froid | 6,0 s | 3,3 s |
-| **recherche répétée** | **6,0 s** | **0,23 – 0,58 s** |
-| appels Riot, recherche répétée | ~86 | ~6 |
+**Vérifié** — `tsc --noEmit`, `npm run test` (109), `npm run build` (14 routes) passent.
+Route éprouvée en direct : message vide → 400, honeypot → 200 sans envoi, 4ᵉ envoi → 429,
+clé absente → 500 **générique côté client** avec la vraie cause dans les logs serveur.
+**Deux vrais emails partis en 200** (un `bug`, un `suggestion`) vers `grosgalio@gmail.com`.
+Bouton présent dans le HTML de `/`, `/login`, `/decouvrir`, `/rejoindre`, vu en capture.
+**Non vérifié en conditions réelles** : la fenêtre modale n'a jamais été **cliquée** dans un
+navigateur, et Resend accepter un envoi ne prouve pas la **réception** en boîte.
 
-**Trois décisions à ne pas défaire :**
+> ### Le piège Resend, vécu deux fois
+> Tant qu'aucun domaine n'est vérifié, Resend n'accepte d'écrire **qu'à l'adresse
+> propriétaire du compte**, et refuse tout le reste en **403** — que le code voit passer et
+> traduit en échec générique. Le premier compte appartenait à `victor.nigretto@gmail.com`
+> alors que le destinataire visé était `grosgalio@gmail.com` : refus systématique.
+> Réglé le 2026-08-17 en **recréant le compte Resend avec `grosgalio@gmail.com`**.
+> Conséquence à retenir : **le destinataire ne peut pas changer sans changer de compte
+> Resend**, tant qu'aucun domaine n'est posé. Le jour où un domaine sera vérifié, il faudra
+> aussi remplacer l'expéditeur `onboarding@resend.dev` dans
+> [route.ts](app/api/feedback/route.ts).
 
-1. **On cache les faits extraits, jamais le brut.** Mesuré ce jour : un match pèse 77 Ko et
-   sa timeline **827 Ko** — 17,7 Mo pour 20 parties. Une ligne de `match_facts` fait
-   ~200 octets. Et ce sont les mêmes faits bruts que `games` (`cs20`, `cs_final`, `deaths`,
-   `deaths_last5`) : les CS/min, la pondération et les couleurs restent calculés à la
-   lecture, donc **une règle qui change n'oblige jamais à purger le cache**.
-2. **La table n'a AUCUNE policy RLS**, et c'est le point de sécurité. RLS active sans policy
-   = tout refusé à `anon` et `authenticated` ; seule la clé `service_role` passe
-   ([lib/supabase/admin.ts](lib/supabase/admin.ts)). Ouvrir l'écriture à `anon` permettrait
-   d'insérer de faux faits par l'API REST, **resservis ensuite à tous les autres
-   utilisateurs** comme s'ils venaient de Riot. Aucune policy SQL ne peut vérifier qu'une
-   ligne vient de Riot : garder l'écriture côté serveur est la seule protection.
-3. **`games` reçoit désormais TOUTES les lignes affichées, plus seulement les nouvelles.**
-   C'est le piège que le cache crée : une partie servie par `match_facts` n'est jamais
-   retéléchargée, donc en n'écrivant que les nouvelles elle n'atterrirait **jamais** dans les
-   games du joueur — et `/suivi`, qui lit `games` en direct, afficherait un cockpit vide.
-   L'upsert est idempotent et n'énumère toujours pas les colonnes de notes.
+> ### Deux variantes, et pourquoi
+> Le coin haut droit de `/suivi` est **déjà occupé** (email + déconnexion + carte de
+> profil). Deux tentatives de pastille flottante y ont échoué : la première recouvrait
+> l'email, la seconde reposait sur la carte. Il n'y a que **12 px** entre le bas de la
+> déconnexion et le haut de la carte — aucun bouton lisible n'y tient.
+>
+> `FeedbackButton` a donc une prop **`variant`** :
+> - **`"fixed"`** (défaut, posé par le layout racine) — pastille en haut à droite de
+>   l'**écran**, sur tous les écrans ;
+> - **`"inline"`** — bouton ordinaire dans le flux, **exactement les classes du bouton
+>   « Se déconnecter »**, que `/suivi` pose à sa gauche.
+>
+> `PAGES_INLINE` liste les chemins qui posent leur propre exemplaire ; la variante
+> flottante s'y efface toute seule, donc il n'y en a jamais deux. **Toute page qui ajoutera
+> un `variant="inline"` devra y être ajoutée.**
+>
+> Mesuré à 1680 et 1440 px : les deux boutons ont la **même hauteur (30 px)**, les mêmes
+> bords haut et bas (44-74), 8 px d'écart, et ne chevauchent ni l'email, ni la carte, ni
+> l'emblème.
 
-L'invariant anti-pollution est intact : `persist` ne gouverne plus que `games`. Le cache
-partagé n'appartient à personne, l'alimenter depuis l'analyse d'un inconnu est sans risque.
+### 2026-08-17 (4) — La clé **Riot** se change depuis l'app, par le seul compte admin
 
-**Le bug attrapé par le test, et la leçon de méthode.** Après avoir branché le cache, j'ai
-comparé **octet pour octet** la réponse servie par le cache et celle d'un appel Riot
-complet, cache vidé puis reconstruit. Divergence de **exactement 100 octets** : Postgres
-rend un `timestamptz` en `...+00:00` là où `toISOString()` donne `...Z` — 5 caractères ×
-20 lignes. `new Date()` parse les deux à l'identique, donc **rien n'aurait cassé et rien ne
-serait jamais apparu dans un log** ; mais la même partie sortait avec deux `played_at`
-différents selon l'état du cache. Un cache dont la sortie dépend de son propre état n'est
-plus transparent. Normalisé à la lecture (`normalize` dans
-[matchCache.ts](lib/riot/matchCache.ts)), re-vérifié identique. **La comparaison
-octet-à-octet cache chaud / cache froid est LE test à refaire sur tout cache futur.**
+**Contexte** — la dev key Riot expire toutes les 24 h ; la remplacer imposait d'éditer
+`.env.local` sur la machine qui sert l'app. *(Premier jet visait la clé Resend : malentendu,
+corrigé le jour même. La clé Resend reste dans l'environnement, elle n'expire pas.)*
 
-**Sécurité vérifiée dans les deux sens**, avec le contrôle anti-faux-positif : `INSERT`
-anonyme refusé (401), lecture anonyme à 0 ligne **alors que la table en contenait 20**, et
-la même clé anon renvoie bien 200 sur `games` — donc le refus vient de RLS et pas d'une clé
-invalide.
+**Changé**
+- **Une variable d'environnement ne se réécrit pas à l'exécution** (et en serverless le
+  disque est en lecture seule) : la clé déménage donc **en base**. Nouvelle table
+  `app_settings` (clé/valeur), migration
+  [20260817_app_settings.sql](supabase/migrations/20260817_app_settings.sql) —
+  **à lancer par Victor**, rien ne marche avant.
+- `lib/settings.ts` : **la base a la priorité, `RIOT_API_KEY` reste le filet de secours.**
+  `lib/riot/client.ts` appelle `cleRiot()` au lieu de lire `process.env`.
+  **Cache mémoire de 30 s obligatoire** : un seul import déclenche ~43 `riotFetch`, donc
+  autant de lectures de la même ligne sans lui. L'écriture vide le cache du process.
+- `app/api/admin/riot-key` : `GET` rend l'état **masqué**, `POST` remplace la clé (format
+  `RGAPI-` + UUID exigé). Contrôle d'accès **côté serveur**, sur l'email de la session.
+- `AdminKeyButton` dans la rangée haut-droite de `/suivi`, aux mêmes classes que ses deux
+  voisins. Il ne rend rien pour les autres comptes.
+- L'admin est **en dur** dans [lib/admin.ts](lib/admin.ts) : le changer exige un commit,
+  donc laisse une trace. Une liste en base ou en env se modifie sans bruit.
 
-**Dégradation gracieuse :** sans `SUPABASE_SERVICE_ROLE_KEY`, `createAdminClient()` renvoie
-`null`, un avertissement part dans les logs et l'app retombe exactement sur son
-comportement d'avant. Testé avant que la clé soit posée. Le cache est une optimisation,
-jamais une dépendance.
+**Vérifié** — `tsc --noEmit`, `npm run test` (109), `npm run build` (15 routes) passent.
+Appel direct non authentifié de `/api/admin/riot-key` : **307 vers `/login`**, en `GET`
+comme en `POST`, rien écrit. **Le repli est prouvé en vrai** : la table n'existant pas
+encore, `[settings]` a crié dans les logs et l'app a bien utilisé `RIOT_API_KEY`.
+**Non vérifié en conditions réelles** : le refus 403 d'un compte connecté **non**
+administrateur (il faudrait un second compte), et l'écran jamais ouvert dans un navigateur.
 
-**Clé Riot expirée, encore** (troisième fois). Même symptôme qu'au 13/08. À faire en premier
-réflexe le matin. La nouvelle clé a été relue par Next **sans redémarrage**, comme la
-dernière fois.
+> **Clé Riot expirée pour la 4ᵉ fois**, constatée ce jour (`401 Unknown apikey`). C'est
+> exactement ce que cet écran sert à réparer sans toucher au serveur.
 
-**Parcours utilisateur — 4 changements demandés par Victor**, livrés :
-1. Accueil : le lien « Déjà un compte ? Connecte-toi » devient un bandeau bleu clair
-   **« Je veux analyser mes erreurs » → `/login`**. On ne propose plus une formalité de
-   compte, on nomme ce que le compte apporte.
-2. Écran de résultat de l'analyse gratuite : **reprend la disposition de `/suivi`** —
-   bandeau d'identité (Riot ID + rôle + rang empilé), « Sur quoi progresser » en pleine
-   largeur en bleu, puis analyse à gauche / historique à droite. Le rôle y est déduit des
-   games (`dominantRole`), un compte public n'ayant pas de `primary_role`.
-3. Un second bandeau **« Analyser mes erreurs »** s'intercale **entre les axes de
-   progression et l'historique** — là où le visiteur vient de voir ses erreurs sans pouvoir
-   les noter.
-4. La déconnexion mène à `/` et non `/login` ; `/login` gagne un
-   **« ← Continuer sans se connecter »** en haut à gauche. Arriver sur le formulaire n'est
-   plus un cul-de-sac.
+**Reste ouvert** — le bouton n'apparaît que pour l'email **exactement**
+`grosgalio@gmail.com` ; les captures de la session montraient `galiogros@gmail.com` puis
+`paul.gentil2240@gmail.com`. **Si le compte de l'app n'a pas cette adresse, le bouton
+reste invisible** — c'est la première chose à vérifier.
 
-`AnalyzeErrorsBanner` est défini **une seule fois** dans `page.tsx` et utilisé aux deux
-endroits — deux copies auraient divergé, comme l'avaient fait les bandeaux d'analyse avant
-`lib/banners.ts`.
-
-**Ce qui N'A PAS pu être vérifié, et pourquoi.** J'ai piloté Chrome en CDP pour capturer les
-écrans. `/login` s'affiche et son lien de sortie est confirmé par requête DOM. Mais **`/`
-reste bloqué sur `LoadingDots` en headless** : `supabase.auth.getUser()` ne résout jamais et
-**aucune requête vers Supabase n'est émise** (toutes les requêtes réseau sont des chunks
-Next). Aucune exception, aucun 4xx, `localStorage` fonctionne, et `/login` s'hydrate
-normalement — donc React tourne. Reproduit en `--headless=new` **et** `--headless=old`.
-C'est un artefact du headless : l'accueil anonyme s'affiche bien dans le navigateur de
-Victor (capture au début de la session). **Piste pour la prochaine fois :** supabase-js
-sérialise ses accès session via `navigator.locks` ; c'est le premier endroit à regarder.
-Conséquence : **les points 1 et 2 du parcours n'ont été validés que par `tsc` et relecture.**
-
-> **Le piège de mesure du 10/08 s'est confirmé autrement.** Le benchmark « 4,8 s » de cette
-> date portait sur **une recherche isolée à froid**. Personne n'avait mesuré **deux
-> recherches d'affilée**, qui est le comportement réel. Le chiffre était juste, le scénario
-> faux — et c'est ce qui a laissé passer le facteur 2 de `handleAnalyze` pendant six jours.
-> Toujours mesurer la répétition, pas seulement le premier coup.
-
-**Le plan restant, décidé avec Victor** (priorités : fluidité + tenir la montée en charge) :
-slice 2 = **annulation de bout en bout** (`AbortSignal`, avec un traitement à part pour le
-chemin d'écriture de `/suivi`) ; slice 3 = **états de chargement honnêtes** ; slice 4 =
-**régulateur de débit**, à faire au moment du déploiement car il lui faut un état partagé
-(un seau à jetons en mémoire est faux dès qu'il y a plusieurs instances serverless).
-**Le fix « supprimer le double import » a été abandonné volontairement** : le cache le rend
-quasi gratuit, et les deux appels en parallèle font s'afficher le winrate SoloQ sans
-attendre l'analyse ranked — on ne sacrifie pas ça pour des appels qu'on ne paie plus.
-
-### 2026-08-13 (2) — Clé Riot expirée : le rang **et** les recommandations tombent ensemble
-
-**Premier vrai test de Victor dans l'app** (enfin — après trois sessions de code non vérifié).
-Symptôme rapporté sur `/suivi` : plus d'emblème, plus de palier, plus de LP, et plus de bloc
-« Sur quoi progresser ». Le reste du cockpit s'affichait normalement, games et couleurs
-comprises.
-
-**Une seule cause pour les deux symptômes : la dev key avait expiré.** Confirmé en une
-requête, sans toucher au code :
-
-```
-{"error":"Riot API 401 ... {\"message\":\"Unknown apikey\",\"status_code\":401}"}
-```
-
-**L'enchaînement, qui est le vrai truc à retenir.** Une clé morte ne fait pas que retirer
-le badge de rang : `res.ok` est faux → `currentRank` reste `null` → le palier de référence
-retombe sur le **`former_rank` saisi à l'onboarding**
-([suivi/page.tsx:152](app/suivi/page.tsx#L152)). Si ce `former_rank` est un palier sans
-contenu écrit, les recommandations disparaissent **aussi**, sans le moindre message.
-Deux symptômes très différents, une seule panne. À se rappeler avant de chercher deux bugs.
-
-Vraie valeur une fois la nouvelle clé posée dans `.env.local` : `PLATINUM I, 22 LP`. Victor
-est donc **platine**, pas diamant — le contenu platine existe, tout est revenu. À noter :
-**Next relit `.env.local` tout seul**, aucun redémarrage du serveur n'a été nécessaire.
-
-**Décision de Victor sur les paliers/rôles sans contenu** (prise ce jour, « pour le
-moment ») : plutôt que de retomber sur le générique, on **emprunte** le contenu écrit le
-plus proche — émeraude pour diamant → challenger, et le mid du même palier pour les quatre
-autres rôles. Mais **les recommandations ne s'empruntent pas** : le bloc affiche
-« Pas encore développé pour ton palier et ton rôle ». Les questions d'erreurs et la
-surbrillance, elles, sont bien servies.
-
-Conséquence visible : le bloc « Sur quoi progresser » **ne disparaît plus jamais**. Avant,
-`{!content.inDevelopment && ...}` le faisait s'évanouir sans explication sur `/` et
-`/suivi` ; il est maintenant toujours rendu, avec l'avertissement à la place du contenu
-(c'est déjà ce que faisait `/onboarding`). Mécanique : une table `CONTENT_TIER` dans
-[mid.ts](lib/content/mid.ts), et `getContent` renvoie `{ ...written, inDevelopment: true }`
-quand le contenu est emprunté — le contenu écrit n'est jamais muté au passage.
-
-**Réserve à surveiller :** les questions empruntées sont rédigées pour le mid. Elles sont
-globalement neutres (« Es-tu mort en lane ? Pourquoi ? »), mais les `focusPoints` d'où elles
-viennent parlent de 2v2 mid-jungle et d'aram mid. Si un joueur support trouve ça à côté de
-la plaque, c'est le premier endroit où regarder.
-
-**Vérifications :** `tsc --noEmit` OK, et **41 assertions** sur le vrai `getContent` exécuté
-via Node 24 (les 6 paliers mid intacts, l'emprunt d'émeraude pour les 4 paliers du haut,
-les 4 rôles, `unranked` qui retombe bien sur le générique, et la non-mutation du contenu
-écrit) — toutes vertes. `npm run build` **pas encore lancé** : le serveur de dev tournait,
-on ne fait pas les deux en même temps vu l'historique de `.next`.
+> ### Le secret est en base, et ça a un prix
+> `app_settings` n'a **aucune policy RLS**, comme `match_facts` : seule la clé
+> `service_role` y accède. Ici ce n'est pas du confort — la table contient un secret en
+> clair. Une policy de lecture, même restreinte à un compte, l'exposerait à l'API REST
+> donc au navigateur. **La clé ne ressort jamais de l'API**, seulement masquée
+> (`re_Dfz••••••••oRBB`) : on la remplace, on ne la relit pas.
+> Contrepartie assumée : elle se retrouve **en clair dans toute sauvegarde de la base**.
+> Une clé Resend compromise se révoque sur resend.com, elle ne se répare pas.
 
 ---
 
@@ -376,6 +324,12 @@ Reste vraiment à vérifier :
       `/` (`supabase.auth.getUser()` ne résout jamais, aucune requête émise ; piste :
       `navigator.locks`), alors que la page marche dans un vrai navigateur. **20 secondes
       d'œil suffisent à lever le doute.**
+- [ ] **Les quatre bandes de couleur en vrai.** Recalibrage complet du 2026-08-17,
+      **jamais vu dans un navigateur**. À regarder : que le **vert pâle `#05df72` se
+      distingue bien du jaune** et du vert foncé sur fond sombre, et que le texte noir du
+      vert pâle reste lisible. Les bandeaux de Victor (platine) doivent dire « Bon farm en
+      lane » (146 CS), « Bon side laner » (7.2) et « Joueur safe » (1.4) — **trois verts
+      pâles, aucune alerte** : valeurs sorties des vraies games, jamais affichées.
 - [ ] **Le signalement en vrai.** Contour fixe des en-têtes et clignotement des cellules
       n'ont été validés que sur maquette avec le CSS compilé. En platine seul « CS après
       20 min » est concerné : un compte iron → gold montre davantage (Lemyy#1376 est
@@ -392,13 +346,13 @@ Reste vraiment à vérifier :
 
 ### Décisions qui n'appartiennent qu'à Victor
 
-- [x] ~~Calibrer les cibles de couleur~~ — **fait le 2026-08-11**, les 10 `PLACEHOLDER` ont
-      disparu au profit de [lib/content/thresholds.ts](lib/content/thresholds.ts).
-      *Réserve à surveiller :* le seuil vert des morts est à **1.0/10 min pour tous les
-      paliers**, alors que le compte challenger mesuré était à **1,74**. Un joueur Iron
-      sera donc rarement vert sur les morts. C'est un choix assumé de Victor (un objectif,
-      pas une moyenne), mais si le cockpit paraît décourageant, c'est la première valeur à
-      revoir.
+- [x] ~~Calibrer les cibles de couleur~~ — **recalibré entièrement le 2026-08-17** sur
+      quatre bandes ([lib/content/thresholds.ts](lib/content/thresholds.ts)).
+      *Réserve levée en partie :* le vert **pâle** des morts est maintenant à 2.0 en iron
+      et bronze, 1.5 en argent et or, 1.0 à partir de platine — un joueur bas elo peut
+      donc enfin être vert. Le vert **foncé** reste à 1.0 (0.5 à partir de platine), ce qui
+      est au-dessus du challenger mesuré à **1,74** : c'est un objectif assumé, pas une
+      moyenne. Si le cockpit paraît décourageant, c'est toujours la première valeur à revoir.
 - [ ] **Le mapping niveau de pyramide ↔ rang** ([lib/content/pyramid.ts:22](lib/content/pyramid.ts#L22)).
       `TIER_PYRAMID_LEVELS` est un premier jet déduit des `focusPoints`, marqué
       `TODO Victor`. C'est ce qui pilote la pyramide de l'onboarding.
@@ -424,6 +378,13 @@ pas du code.
         Depuis la réécriture du 2026-08-17 il décrit en plus du contenu qui n'existe plus.
       - `secondary_role` — demandé au joueur à l'onboarding, écrit en base, jamais relu.
       - `wins` / `losses` — remontés par les deux routes API jusqu'au state React, jamais affichés.
+- [ ] **L'échec du rang est avalé en silence**
+      ([app/api/riot/import/route.ts:217](app/api/riot/import/route.ts#L217)) : `.catch(() => [])`
+      transforme un `401 Unknown apikey` en « pas de rang », sans un mot dans la réponse ni
+      dans les logs. Comme les games viennent de Supabase, le cockpit paraît sain et seul le
+      rang manque — c'est ce qui a coûté un diagnostic complet le 2026-08-17. **Faire remonter
+      la raison** au lieu de la masquer, et **prévenir quand la clé en base diffère de celle de
+      l'environnement** : rien ne signale aujourd'hui qu'éditer `.env.local` est sans effet.
 - [ ] **`/suivi` ne vérifie pas `onboarded_at`** — un user connecté mais pas onboardé qui
       va directement sur `/suivi` passe. Seul `/` fait l'aiguillage.
 - [ ] **Contrainte d'unicité de `games`** encore sur `(user_id, riot_match_id)` : deux
@@ -477,6 +438,13 @@ Priorités posées par Victor : **fluidité** d'abord, et **tenir la montée en 
 - [ ] **`/api/riot/import` est publique et non rate-limitée**
       ([lib/supabase/proxy.ts:55](lib/supabase/proxy.ts#L55)). Nécessaire pour l'analyse
       gratuite, mais n'importe qui peut cramer le quota Riot.
+- [ ] **Redirect URLs de Supabase Auth jamais revues après le renommage Vercel** du
+      2026-08-17 : `lol-dashboard-three` et `lol-dashboard-nigretto` sont **mortes**. Si l'une
+      d'elles y est encore déclarée, la connexion en production casse. Se règle dans le
+      dashboard Supabase, hors dépôt.
+- [ ] **`RIOT_API_KEY` dans `.env.local` est une clé expirée.** Sans effet tant que la base
+      en porte une (elle a la priorité), mais c'est un piège différé : le jour où
+      `app_settings` est vidée, le repli tombe sur une clé morte.
 - [ ] **README** = encore le boilerplate `create-next-app`. Rien sur `supabase/schema.sql`,
       la `RIOT_API_KEY`, ni le setup.
 - [ ] **3 vulnérabilités `high` remontées par `npm audit`** (relevé le 2026-08-16, non

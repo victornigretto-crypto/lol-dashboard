@@ -139,30 +139,40 @@ export function averageCsPerMin(values: (number | null)[]): number | null {
 
 // --- Couleurs ------------------------------------------------------------
 
-// Jugement d'une valeur face aux seuils de son palier. "unknown" = valeur ou
-// seuils inconnus : on ne dit rien plutôt que de dire faux. Les couleurs ET
-// les bandeaux d'analyse dérivent tous de ces deux fonctions : un seul
-// endroit fixe les règles de comparaison.
-export type Band = "good" | "warn" | "bad" | "unknown";
+// Jugement d'une valeur face aux seuils de son palier, sur quatre bandes.
+// "unknown" = valeur ou seuils inconnus : on ne dit rien plutôt que de dire
+// faux. Les couleurs ET les bandeaux d'analyse dérivent tous de ces deux
+// fonctions : un seul endroit fixe les règles de comparaison.
+export type Band = "great" | "good" | "warn" | "bad" | "unknown";
 
 // Farm : plus grand = mieux.
 export function csBand(value: number | null, threshold: StatThreshold | null): Band {
   if (value === null || threshold === null) return "unknown";
-  if (value >= threshold.green) return "good";
-  if (value >= threshold.yellow) return "warn";
+  if (value >= threshold.great) return "great";
+  if (value >= threshold.good) return "good";
+  if (value >= threshold.warn) return "warn";
   return "bad";
 }
 
 // Morts : logique inversée, plus petit = mieux.
 export function deathsBand(value: number | null, threshold: StatThreshold | null): Band {
   if (value === null || threshold === null) return "unknown";
-  if (value <= threshold.green) return "good";
-  if (value <= threshold.yellow) return "warn";
+  if (value <= threshold.great) return "great";
+  if (value <= threshold.good) return "good";
+  if (value <= threshold.warn) return "warn";
   return "bad";
 }
 
+// LA table de couleurs de l'app. Les bandeaux d'analyse la réutilisent telle
+// quelle (cf. SEVERITY_CLASS dans lib/banners) : la dupliquer laisserait un
+// bandeau vert coexister avec une colonne d'une autre teinte au premier
+// changement de palette.
+//
+// Le vert pâle et le jaune portent du texte noir, le vert foncé et le rouge du
+// blanc : c'est le contraste qui décide, pas l'esthétique.
 const BAND_CLASS: Record<Band, string> = {
-  good: "bg-green-600 text-white",
+  great: "bg-green-700 text-white",
+  good: "bg-green-400 text-black",
   warn: "bg-yellow-500 text-black",
   bad: "bg-red-600 text-white",
   unknown: "bg-slate-800 text-slate-300",
