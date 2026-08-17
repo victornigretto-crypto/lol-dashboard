@@ -19,7 +19,18 @@ type Variante = "fixed" | "inline";
 // Chemins qui posent eux-mêmes leur bouton : la version flottante s'y efface.
 const PAGES_INLINE = ["/suivi"];
 
-type TypeRetour = "bug" | "suggestion";
+// Les deux retours ne suivent plus le même chemin, décision de Victor du
+// 2026-08-17 :
+//
+//   bug        -> un Google Sheet, tenu hors de l'app.
+//   suggestion -> le formulaire et l'email, inchangés.
+//
+// La fenêtre s'ouvre donc sur un MENU, et non plus sur le formulaire coiffé de
+// deux onglets : le bug ne mène plus à un champ de texte, il quitte l'app.
+type Etape = "choix" | "suggestion";
+
+const LIEN_BUG =
+  "https://docs.google.com/spreadsheets/d/1Fr8H_LJugeg7_BuKCCS2ZCdpadmE_avMlOP0ymp719g/edit?usp=sharing";
 
 // idle : formulaire ouvert · sending : envoi en cours · sent : confirmation
 // affichée. L'échec ne sort pas de l'état "idle" : le formulaire reste rempli,
@@ -49,7 +60,7 @@ function IconeBug({ className }: { className?: string }) {
 export function FeedbackButton({ variant = "fixed" }: { variant?: Variante }) {
   const chemin = usePathname();
   const [ouvert, setOuvert] = useState(false);
-  const [type, setType] = useState<TypeRetour>("bug");
+  const [etape, setEtape] = useState<Etape>("choix");
   const [message, setMessage] = useState("");
   // Le honeypot : jamais rempli par un humain, puisqu'il est hors écran.
   const [website, setWebsite] = useState("");
@@ -68,19 +79,26 @@ export function FeedbackButton({ variant = "fixed" }: { variant?: Variante }) {
     return () => document.removeEventListener("keydown", surTouche);
   }, [ouvert]);
 
+  // Le champ ne prend le focus qu'une fois le formulaire réellement affiché :
+  // au premier écran il n'existe pas encore.
   useEffect(() => {
-    if (ouvert && etat === "idle") champRef.current?.focus();
-  }, [ouvert, etat]);
+    if (ouvert && etape === "suggestion" && etat === "idle") champRef.current?.focus();
+  }, [ouvert, etape, etat]);
+
+  function ouvrir() {
+    // Toujours rouvrir sur le menu : sans ça, quelqu'un qui a commencé une
+    // suggestion puis refermé sans envoyer retomberait droit sur son brouillon,
+    // sans jamais revoir le choix.
+    setEtape("choix");
+    setOuvert(true);
+  }
 
   function fermer() {
     setOuvert(false);
     // On rend le formulaire vierge APRÈS la fermeture, et seulement si l'envoi
     // a abouti : refermer par erreur ne doit pas effacer ce qui a été écrit.
     setEtat((precedent) => {
-      if (precedent === "sent") {
-        setMessage("");
-        setType("bug");
-      }
+      if (precedent === "sent") setMessage("");
       return "idle";
     });
     setErreur(null);
@@ -96,7 +114,8 @@ export function FeedbackButton({ variant = "fixed" }: { variant?: Variante }) {
       const reponse = await fetch("/api/feedback", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type, message, website }),
+        // Le seul type qui passe encore par ici : le bug part sur le tableur.
+        body: JSON.stringify({ type: "suggestion", message, website }),
       });
       const data = await reponse.json().catch(() => null);
       if (!reponse.ok) {
@@ -113,21 +132,10 @@ export function FeedbackButton({ variant = "fixed" }: { variant?: Variante }) {
     }
   }
 
-  const choix = (valeur: TypeRetour, libelle: string) => (
-    <button
-      type="button"
-      onClick={() => setType(valeur)}
-      aria-pressed={type === valeur}
-      className={
-        "flex-1 rounded-xl border px-3 py-2.5 text-sm font-semibold transition " +
-        (type === valeur
-          ? "border-blue-500 bg-blue-500/15 text-blue-200"
-          : "border-slate-700 text-slate-300 hover:border-slate-500")
-      }
-    >
-      {libelle}
-    </button>
-  );
+  // Les deux entrées du menu, aux mêmes dimensions et à la même hiérarchie :
+  // aucun des deux retours n'est « le bon », on ne pousse vers ni l'un ni l'autre.
+  const CARTE =
+    "block w-full rounded-xl border border-slate-700 px-4 py-3 text-left transition hover:border-blue-500 hover:bg-blue-500/10";
 
   // La page pose son propre exemplaire : la pastille flottante s'efface, sinon
   // les deux coexisteraient. Le test vient APRÈS tous les hooks — les appeler
@@ -150,7 +158,7 @@ export function FeedbackButton({ variant = "fixed" }: { variant?: Variante }) {
 
   return (
     <>
-      <button type="button" onClick={() => setOuvert(true)} className={classes}>
+      <button type="button" onClick={ouvrir} className={classes}>
         <IconeBug className={variant === "inline" ? "h-3.5 w-3.5" : "h-4 w-4"} />
         Rapporter un problème
       </button>
@@ -188,7 +196,7 @@ export function FeedbackButton({ variant = "fixed" }: { variant?: Variante }) {
                 </button>
               </div>
             ) : (
-              <form onSubmit={envoyer}>
+              <>
                 <div className="flex items-start justify-between gap-3">
                   <h2 className="flex items-center gap-2 text-lg font-semibold text-slate-100">
                     <IconeBug className="h-5 w-5 text-slate-400" />
@@ -204,51 +212,96 @@ export function FeedbackButton({ variant = "fixed" }: { variant?: Variante }) {
                   </button>
                 </div>
 
-                <div className="mt-4 flex gap-2">
-                  {choix("bug", "Rapporter un bug")}
-                  {choix("suggestion", "Suggérer une amélioration")}
-                </div>
+                {etape === "choix" ? (
+                  <div className="mt-4 space-y-2">
+                    {/* Une vraie ancre, pas un bouton qui appellerait
+                        `window.open` : le clic du milieu, le « ouvrir dans un
+                        nouvel onglet » et l'aperçu de l'URL en bas du navigateur
+                        ne fonctionnent que sur un <a href>.
+                        Nouvel onglet : le tableur est hors de l'app, et
+                        remplacer la page ferait perdre l'analyse en cours.
+                        `noreferrer` accompagne `noopener` — sans lui, la page
+                        ouverte apprend de quelle URL vient l'utilisateur. */}
+                    <a
+                      href={LIEN_BUG}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={fermer}
+                      className={CARTE}
+                    >
+                      <span className="block text-sm font-semibold text-slate-100">
+                        Rapporter un bug
+                      </span>
+                      <span className="mt-0.5 block text-xs text-slate-400">
+                        Ouvre le tableau de suivi des bugs dans un nouvel onglet.
+                      </span>
+                    </a>
 
-                <textarea
-                  ref={champRef}
-                  value={message}
-                  onChange={(e) => setMessage(e.target.value)}
-                  rows={5}
-                  maxLength={5000}
-                  placeholder={
-                    type === "bug"
-                      ? "Ce que tu faisais, et ce qui s'est passé..."
-                      : "Ce que tu aimerais voir changer..."
-                  }
-                  className="mt-3 w-full resize-none rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-slate-100 placeholder:text-slate-600 focus:border-blue-500 focus:outline-none"
-                />
+                    <button type="button" onClick={() => setEtape("suggestion")} className={CARTE}>
+                      <span className="block text-sm font-semibold text-slate-100">
+                        Suggérer une amélioration
+                      </span>
+                      <span className="mt-0.5 block text-xs text-slate-400">
+                        Écris ton idée, elle part directement par email.
+                      </span>
+                    </button>
+                  </div>
+                ) : (
+                  <form onSubmit={envoyer}>
+                    {/* Un clic à côté dans le menu ne doit pas obliger à tout
+                        refermer pour revenir en arrière. */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEtape("choix");
+                        setErreur(null);
+                      }}
+                      className="mt-3 text-xs text-slate-400 transition hover:text-slate-200"
+                    >
+                      ← Retour
+                    </button>
 
-                {/* Honeypot. `aria-hidden` + tabIndex -1 : ni lu par un lecteur
-                    d'écran, ni atteignable au clavier. Positionné hors écran
-                    plutôt qu'en `display:none`, que certains robots détectent. */}
-                <div className="pointer-events-none absolute left-[-9999px] top-0" aria-hidden="true">
-                  <label>
-                    Ne remplis pas ce champ
-                    <input
-                      type="text"
-                      tabIndex={-1}
-                      autoComplete="off"
-                      value={website}
-                      onChange={(e) => setWebsite(e.target.value)}
+                    <textarea
+                      ref={champRef}
+                      value={message}
+                      onChange={(e) => setMessage(e.target.value)}
+                      rows={5}
+                      maxLength={5000}
+                      placeholder="Ce que tu aimerais voir changer..."
+                      className="mt-2 w-full resize-none rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-slate-100 placeholder:text-slate-600 focus:border-blue-500 focus:outline-none"
                     />
-                  </label>
-                </div>
 
-                {erreur && <p className="mt-2 text-sm text-red-400">{erreur}</p>}
+                    {/* Honeypot. `aria-hidden` + tabIndex -1 : ni lu par un lecteur
+                        d'écran, ni atteignable au clavier. Positionné hors écran
+                        plutôt qu'en `display:none`, que certains robots détectent. */}
+                    <div
+                      className="pointer-events-none absolute left-[-9999px] top-0"
+                      aria-hidden="true"
+                    >
+                      <label>
+                        Ne remplis pas ce champ
+                        <input
+                          type="text"
+                          tabIndex={-1}
+                          autoComplete="off"
+                          value={website}
+                          onChange={(e) => setWebsite(e.target.value)}
+                        />
+                      </label>
+                    </div>
 
-                <button
-                  type="submit"
-                  disabled={message.trim() === "" || etat === "sending"}
-                  className="mt-4 w-full rounded-full bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {etat === "sending" ? "Envoi..." : "Envoyer"}
-                </button>
-              </form>
+                    {erreur && <p className="mt-2 text-sm text-red-400">{erreur}</p>}
+
+                    <button
+                      type="submit"
+                      disabled={message.trim() === "" || etat === "sending"}
+                      className="mt-4 w-full rounded-full bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {etat === "sending" ? "Envoi..." : "Envoyer"}
+                    </button>
+                  </form>
+                )}
+              </>
             )}
           </div>
         </div>

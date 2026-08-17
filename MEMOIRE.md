@@ -152,6 +152,37 @@ même sans contenu écrit.
 
 ## Journal des sessions
 
+### 2026-08-17 (6) — Le signalement se scinde : les bugs sur un tableur, les idées par email
+
+**Contexte** — Victor veut que « Rapporter un bug » mène à un Google Sheet plutôt qu'à un
+champ de texte. Les suggestions, elles, ne changent pas.
+
+**Changé**
+- [FeedbackButton.tsx](app/_components/FeedbackButton.tsx) : la fenêtre s'ouvre désormais sur
+  un **menu à deux entrées** au lieu du formulaire coiffé de deux onglets. « Rapporter un
+  bug » est une **ancre** vers le tableur (`target="_blank"`, `rel="noopener noreferrer"`) ;
+  « Suggérer une amélioration » mène au champ de texte inchangé.
+- Une **ancre et non un `window.open`** : le clic du milieu, le « ouvrir dans un nouvel
+  onglet » et l'aperçu de l'URL en bas du navigateur n'existent que sur un `<a href>`.
+- **Nouvel onglet plutôt que navigation** : signaler un bug depuis `/suivi` ne doit pas faire
+  perdre le cockpit et la saisie en cours.
+- Le formulaire envoie maintenant toujours `type: "suggestion"` — le chemin « bug » ne passe
+  plus par l'API. **[app/api/feedback/route.ts](app/api/feedback/route.ts) n'a pas été
+  touchée** : destinataire, 5000 caractères, honeypot, limite de débit, tout est identique.
+  Elle accepte encore les deux types, ce qui ne coûte rien.
+- Un « ← Retour » discret du formulaire vers le menu : sans lui, un clic à côté obligeait à
+  refermer et rouvrir.
+
+**Vérifié** — `tsc --noEmit`, `npm run test` (109), `npm run build` passent. Serveur de dev
+lancé : le bouton est bien dans le HTML de `/`, et l'URL du tableur dans le chunk
+`app__components_FeedbackButton_tsx`. **Victor a testé dans son navigateur et validé.**
+Non testé : l'envoi réel d'un email (il aurait expédié un vrai message).
+
+> **Rappel Resend**, inchangé mais toujours vrai : tant qu'aucun domaine n'est vérifié,
+> l'envoi n'aboutit **qu'à** l'adresse propriétaire du compte Resend. Un échec d'envoi n'est
+> donc pas forcément un bug du formulaire.
+
+
 ### 2026-08-17 (5) — URL de production en `gg-dashboard`, colonne conclusion élargie
 
 **Contexte** — l'URL Vercel portait encore `lol-dashboard`, et « Résumé / Conclusion » ne
@@ -202,61 +233,6 @@ navigateur, et le rang réellement affiché dans le cockpit.
 > simplement en **302 vers le SSO** — présent mais non public, et c'est le mieux qu'on
 > puisse obtenir. Inutile d'essayer de le supprimer, il reviendra.
 
-
-### 2026-08-17 (3) — Bouton « Rapporter un problème » sur tous les écrans
-
-**Contexte** — Victor veut recevoir les retours des joueurs par email.
-
-**Changé**
-- `FeedbackButton` (client) posé **dans le layout racine**, donc présent partout sans
-  qu'aucune page ait à s'en occuper : bouton fixe en haut à droite + fenêtre modale
-  (bug / suggestion, texte libre, confirmation après envoi).
-- `app/api/feedback/route.ts` : **Resend appelé en `fetch` HTTPS, sans SDK** — décision de
-  Victor, `package.json` est resté **strictement inchangé**. Message vide refusé,
-  5000 caractères max, **honeypot** (champ hors écran ; s'il est rempli on répond un
-  succès ordinaire, pour ne rien apprendre au robot) et **3 envois par IP / 10 min**.
-- `/api/feedback` ajoutée aux routes publiques du proxy, comme `/api/riot/import` : sans
-  ça, le `fetch` d'un visiteur non connecté recevait une redirection HTML vers `/login`.
-- `RESEND_API_KEY` documentée dans [.env.local.example](.env.local.example).
-
-**Vérifié** — `tsc --noEmit`, `npm run test` (109), `npm run build` (14 routes) passent.
-Route éprouvée en direct : message vide → 400, honeypot → 200 sans envoi, 4ᵉ envoi → 429,
-clé absente → 500 **générique côté client** avec la vraie cause dans les logs serveur.
-**Deux vrais emails partis en 200** (un `bug`, un `suggestion`) vers `grosgalio@gmail.com`.
-Bouton présent dans le HTML de `/`, `/login`, `/decouvrir`, `/rejoindre`, vu en capture.
-**Non vérifié en conditions réelles** : la fenêtre modale n'a jamais été **cliquée** dans un
-navigateur, et Resend accepter un envoi ne prouve pas la **réception** en boîte.
-
-> ### Le piège Resend, vécu deux fois
-> Tant qu'aucun domaine n'est vérifié, Resend n'accepte d'écrire **qu'à l'adresse
-> propriétaire du compte**, et refuse tout le reste en **403** — que le code voit passer et
-> traduit en échec générique. Le premier compte appartenait à `victor.nigretto@gmail.com`
-> alors que le destinataire visé était `grosgalio@gmail.com` : refus systématique.
-> Réglé le 2026-08-17 en **recréant le compte Resend avec `grosgalio@gmail.com`**.
-> Conséquence à retenir : **le destinataire ne peut pas changer sans changer de compte
-> Resend**, tant qu'aucun domaine n'est posé. Le jour où un domaine sera vérifié, il faudra
-> aussi remplacer l'expéditeur `onboarding@resend.dev` dans
-> [route.ts](app/api/feedback/route.ts).
-
-> ### Deux variantes, et pourquoi
-> Le coin haut droit de `/suivi` est **déjà occupé** (email + déconnexion + carte de
-> profil). Deux tentatives de pastille flottante y ont échoué : la première recouvrait
-> l'email, la seconde reposait sur la carte. Il n'y a que **12 px** entre le bas de la
-> déconnexion et le haut de la carte — aucun bouton lisible n'y tient.
->
-> `FeedbackButton` a donc une prop **`variant`** :
-> - **`"fixed"`** (défaut, posé par le layout racine) — pastille en haut à droite de
->   l'**écran**, sur tous les écrans ;
-> - **`"inline"`** — bouton ordinaire dans le flux, **exactement les classes du bouton
->   « Se déconnecter »**, que `/suivi` pose à sa gauche.
->
-> `PAGES_INLINE` liste les chemins qui posent leur propre exemplaire ; la variante
-> flottante s'y efface toute seule, donc il n'y en a jamais deux. **Toute page qui ajoutera
-> un `variant="inline"` devra y être ajoutée.**
->
-> Mesuré à 1680 et 1440 px : les deux boutons ont la **même hauteur (30 px)**, les mêmes
-> bords haut et bas (44-74), 8 px d'écart, et ne chevauchent ni l'email, ni la carte, ni
-> l'emblème.
 
 ### 2026-08-17 (4) — La clé **Riot** se change depuis l'app, par le seul compte admin
 

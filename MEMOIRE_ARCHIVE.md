@@ -13,6 +13,61 @@
 
 ---
 
+### 2026-08-17 (3) — Bouton « Rapporter un problème » sur tous les écrans
+
+**Contexte** — Victor veut recevoir les retours des joueurs par email.
+
+**Changé**
+- `FeedbackButton` (client) posé **dans le layout racine**, donc présent partout sans
+  qu'aucune page ait à s'en occuper : bouton fixe en haut à droite + fenêtre modale
+  (bug / suggestion, texte libre, confirmation après envoi).
+- `app/api/feedback/route.ts` : **Resend appelé en `fetch` HTTPS, sans SDK** — décision de
+  Victor, `package.json` est resté **strictement inchangé**. Message vide refusé,
+  5000 caractères max, **honeypot** (champ hors écran ; s'il est rempli on répond un
+  succès ordinaire, pour ne rien apprendre au robot) et **3 envois par IP / 10 min**.
+- `/api/feedback` ajoutée aux routes publiques du proxy, comme `/api/riot/import` : sans
+  ça, le `fetch` d'un visiteur non connecté recevait une redirection HTML vers `/login`.
+- `RESEND_API_KEY` documentée dans [.env.local.example](.env.local.example).
+
+**Vérifié** — `tsc --noEmit`, `npm run test` (109), `npm run build` (14 routes) passent.
+Route éprouvée en direct : message vide → 400, honeypot → 200 sans envoi, 4ᵉ envoi → 429,
+clé absente → 500 **générique côté client** avec la vraie cause dans les logs serveur.
+**Deux vrais emails partis en 200** (un `bug`, un `suggestion`) vers `grosgalio@gmail.com`.
+Bouton présent dans le HTML de `/`, `/login`, `/decouvrir`, `/rejoindre`, vu en capture.
+**Non vérifié en conditions réelles** : la fenêtre modale n'a jamais été **cliquée** dans un
+navigateur, et Resend accepter un envoi ne prouve pas la **réception** en boîte.
+
+> ### Le piège Resend, vécu deux fois
+> Tant qu'aucun domaine n'est vérifié, Resend n'accepte d'écrire **qu'à l'adresse
+> propriétaire du compte**, et refuse tout le reste en **403** — que le code voit passer et
+> traduit en échec générique. Le premier compte appartenait à `victor.nigretto@gmail.com`
+> alors que le destinataire visé était `grosgalio@gmail.com` : refus systématique.
+> Réglé le 2026-08-17 en **recréant le compte Resend avec `grosgalio@gmail.com`**.
+> Conséquence à retenir : **le destinataire ne peut pas changer sans changer de compte
+> Resend**, tant qu'aucun domaine n'est posé. Le jour où un domaine sera vérifié, il faudra
+> aussi remplacer l'expéditeur `onboarding@resend.dev` dans
+> [route.ts](app/api/feedback/route.ts).
+
+> ### Deux variantes, et pourquoi
+> Le coin haut droit de `/suivi` est **déjà occupé** (email + déconnexion + carte de
+> profil). Deux tentatives de pastille flottante y ont échoué : la première recouvrait
+> l'email, la seconde reposait sur la carte. Il n'y a que **12 px** entre le bas de la
+> déconnexion et le haut de la carte — aucun bouton lisible n'y tient.
+>
+> `FeedbackButton` a donc une prop **`variant`** :
+> - **`"fixed"`** (défaut, posé par le layout racine) — pastille en haut à droite de
+>   l'**écran**, sur tous les écrans ;
+> - **`"inline"`** — bouton ordinaire dans le flux, **exactement les classes du bouton
+>   « Se déconnecter »**, que `/suivi` pose à sa gauche.
+>
+> `PAGES_INLINE` liste les chemins qui posent leur propre exemplaire ; la variante
+> flottante s'y efface toute seule, donc il n'y en a jamais deux. **Toute page qui ajoutera
+> un `variant="inline"` devra y être ajoutée.**
+>
+> Mesuré à 1680 et 1440 px : les deux boutons ont la **même hauteur (30 px)**, les mêmes
+> bords haut et bas (44-74), 8 px d'écart, et ne chevauchent ni l'email, ni la carte, ni
+> l'emblème.
+
 ### 2026-08-17 (2) — Quatre bandes de couleur au lieu de trois
 
 **Contexte** — Victor a recalibré toute la grille et ajouté un **vert pâle** entre le jaune
