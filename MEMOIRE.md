@@ -549,3 +549,5 @@ prendre le premier `puuid` de
 puis le résoudre en Riot ID via `/riot/account/v1/accounts/by-puuid/{puuid}`.
 
 Il faut un `.env.local` — voir [.env.local.example](.env.local.example).
+
+<!-- test de declenchement du deploiement automatique Vercel, 2026-08-17 -->
