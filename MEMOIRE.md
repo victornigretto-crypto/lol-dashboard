@@ -57,6 +57,13 @@ tiers**, ne pas repartir le chercher. Un domaine `.vercel.app` n'est public que 
 **enregistré sur le projet** (`vercel domains add`) : la protection du projet est réglée sur
 `all_except_custom_domains`, tout le reste part en 302 vers le SSO Vercel.
 
+**Les push sur `master` déploient tout seuls** depuis le 2026-08-17 : le dépôt GitHub est
+connecté au projet et **`master` est la Production Branch**. Prouvé par un push réel, pas par
+une inspection — un déploiement `production` est apparu ~1 min après, avec l'alias
+`gg-dashboard-git-master-nigretto.vercel.app` (le motif `-git-<branche>-` n'existe que pour un
+déploiement déclenché par Git). **`vercel project inspect` n'affiche aucune section Git même
+une fois le dépôt connecté** : son silence ne prouve rien, ne pas s'y fier.
+
 > ### Le cockpit est un tableau depuis le 2026-08-17
 > `/suivi` n'affiche plus des cartes mais un **tableau type tableur** : 9 colonnes
 > (matchup · V/D · CS/20min · CS après 20min · morts/10min · les 3 questions du palier ·
@@ -549,5 +556,3 @@ prendre le premier `puuid` de
 puis le résoudre en Riot ID via `/riot/account/v1/accounts/by-puuid/{puuid}`.
 
 Il faut un `.env.local` — voir [.env.local.example](.env.local.example).
-
-<!-- test de declenchement du deploiement automatique Vercel, 2026-08-17 -->
