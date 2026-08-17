@@ -106,7 +106,7 @@ function LoginForm() {
         href="/"
         className="absolute top-4 left-4 rounded-full border border-slate-700 px-4 py-1.5 text-sm text-slate-300 hover:bg-slate-800 hover:text-slate-100"
       >
-        ← Continuer sans se connecter
+        Continuer sans se connecter
       </Link>
 
       <div className="w-full max-w-sm rounded-2xl border border-slate-700 bg-slate-900/90 p-6 shadow-sm">

@@ -184,6 +184,9 @@ d'erreur de la clé Riot.
 - **[lib/riot/client.ts](lib/riot/client.ts)** : un 401/403 de Riot rend désormais
   « Expiration de la clef API : Contacter Gros Galio pour lui demander de la refresh » au lieu
   du JSON brut. Le détail technique part dans les logs serveur.
+- **[app/login/page.tsx](app/login/page.tsx)** : la flèche `←` du bouton « Continuer sans se
+  connecter » (haut à gauche, hors de la carte) est retirée. Un caractère ; la pilule, sa
+  bordure et sa position ne bougent pas.
 
 **Vérifié** — `tsc --noEmit`, **128 tests** (15 nouveaux), `npm run build`. Le chemin d'erreur
 401/403 est couvert par des tests qui simulent les réponses de Riot ; aucune vraie expiration
