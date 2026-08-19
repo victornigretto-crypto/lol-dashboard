@@ -89,6 +89,10 @@ const toUpdatePayload = (game: Game) => ({
 
 const SAVE_DELAY_MS = 600;
 
+// Délai minimal entre deux synchronisations déclenchées par le retour sur
+// l'onglet. Le bouton manuel n'y est pas soumis.
+const DELAI_GARDE_MS = 60_000;
+
 type ErrorField = "errorLane" | "errorMacro" | "errorFight";
 
 export default function SuiviPage() {
@@ -119,6 +123,15 @@ export default function SuiviPage() {
   // les données de la base, il ne les remplace pas.
   const [erreurImport, setErreurImport] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
+
+  // Couleur du rond du bouton « Mettre à jour le profil » :
+  //   attente -> gris · encours -> jaune · fait -> vert.
+  const [etatMaj, setEtatMaj] = useState<"attente" | "encours" | "fait">("attente");
+
+  // Horodatage du dernier import terminé. Sert UNIQUEMENT au déclenchement
+  // automatique au retour d'onglet, jamais au bouton — un clic est une
+  // intention explicite, il ne se fait pas refuser.
+  const dernierImport = useRef(0);
 
   const gamesRef = useRef<Game[]>([]);
   const saveTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
@@ -208,6 +221,10 @@ export default function SuiviPage() {
           setGames((data as GameRow[]).map(fromRow));
         }
       }
+      dernierImport.current = Date.now();
+      // Le rond ne passe au vert que si un CLIC attendait ce résultat. Un
+      // chargement de page ou une synchronisation silencieuse le laissent gris.
+      setEtatMaj((precedent) => (precedent === "encours" ? "fait" : precedent));
       setLoading(false);
     })();
 
@@ -215,6 +232,35 @@ export default function SuiviPage() {
       active = false;
     };
   }, [supabase, reloadKey]);
+
+  // Rafraîchissement au retour sur l'onglet. Volontairement PAS de minuteur :
+  // seule l'activité réelle de l'utilisateur déclenche un appel.
+  //
+  // Le délai de garde n'est pas du confort. `/api/riot/import` n'a AUCUNE
+  // limite de débit, et un import tout en cache coûte quand même 3 appels Riot
+  // fixes (account-v1, la liste des matchs, league-v4). Le quota de la clé est
+  // de 100 requêtes / 2 min, et il est PARTAGÉ par tous les utilisateurs : sans
+  // ce garde-fou, un seul joueur qui change d'onglet toutes les dix secondes
+  // consomme un tiers du budget à lui seul, et le 429 arrive à trois joueurs.
+  useEffect(() => {
+    const auRetour = () => {
+      if (document.visibilityState !== "visible") return;
+      if (Date.now() - dernierImport.current < DELAI_GARDE_MS) return;
+      // Silencieux : on ne touche pas au rond, l'utilisateur n'a rien demandé.
+      setReloadKey((key) => key + 1);
+    };
+    document.addEventListener("visibilitychange", auRetour);
+    return () => document.removeEventListener("visibilitychange", auRetour);
+  }, []);
+
+  const mettreAJour = () => {
+    if (etatMaj === "encours") return;
+    setEtatMaj("encours");
+    // On réutilise `reloadKey` plutôt que de refaire l'enchaînement import ->
+    // relecture des games : une deuxième copie de cette logique finirait par
+    // diverger de celle de l'effet.
+    setReloadKey((key) => key + 1);
+  };
 
   const scheduleSave = (id: string) => {
     const timers = saveTimers.current;
@@ -446,6 +492,35 @@ export default function SuiviPage() {
                 <p className="mt-1 text-slate-400">
                   {primaryRole ? `Rôle principal : ${primaryRole}` : "Rôle principal en cours de détection"}
                 </p>
+
+                {/* Même bleu que l'appel à l'action de l'accueil, mais en
+                    `text-sm` : ce bouton accompagne l'identité du profil, il ne
+                    doit pas peser plus lourd que le Riot ID au-dessus de lui.
+                    Inactif pendant l'appel — sans ça, une rafale de clics
+                    partirait droit sur l'API Riot, qui n'a aucune limite de
+                    débit côté serveur. */}
+                <button
+                  type="button"
+                  onClick={mettreAJour}
+                  disabled={etatMaj === "encours"}
+                  aria-busy={etatMaj === "encours"}
+                  className="mt-3 inline-flex items-center gap-2 rounded-full bg-blue-500 px-4 py-1.5 text-sm font-semibold text-white transition hover:bg-blue-400 disabled:cursor-not-allowed disabled:opacity-70"
+                >
+                  {/* Le rond dit où on en est sans déplacer le texte : gris au
+                      repos, jaune pendant l'appel, vert une fois à jour. */}
+                  <span
+                    aria-hidden="true"
+                    className={
+                      "h-2.5 w-2.5 shrink-0 rounded-full " +
+                      (etatMaj === "encours"
+                        ? "bg-yellow-400"
+                        : etatMaj === "fait"
+                          ? "bg-green-400"
+                          : "bg-slate-400")
+                    }
+                  />
+                  {etatMaj === "encours" ? "Mise à jour..." : "Mettre à jour le profil"}
+                </button>
               </div>
 
               {/* Emblème, palier, LP empilés — la disposition du client LoL. */}

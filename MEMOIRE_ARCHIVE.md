@@ -13,6 +13,36 @@
 
 ---
 
+### 2026-08-17 (6) — Le signalement se scinde : les bugs sur un tableur, les idées par email
+
+**Contexte** — Victor veut que « Rapporter un bug » mène à un Google Sheet plutôt qu'à un
+champ de texte. Les suggestions, elles, ne changent pas.
+
+**Changé**
+- [FeedbackButton.tsx](app/_components/FeedbackButton.tsx) : la fenêtre s'ouvre désormais sur
+  un **menu à deux entrées** au lieu du formulaire coiffé de deux onglets. « Rapporter un
+  bug » est une **ancre** vers le tableur (`target="_blank"`, `rel="noopener noreferrer"`) ;
+  « Suggérer une amélioration » mène au champ de texte inchangé.
+- Une **ancre et non un `window.open`** : le clic du milieu, le « ouvrir dans un nouvel
+  onglet » et l'aperçu de l'URL en bas du navigateur n'existent que sur un `<a href>`.
+- **Nouvel onglet plutôt que navigation** : signaler un bug depuis `/suivi` ne doit pas faire
+  perdre le cockpit et la saisie en cours.
+- Le formulaire envoie maintenant toujours `type: "suggestion"` — le chemin « bug » ne passe
+  plus par l'API. **[app/api/feedback/route.ts](app/api/feedback/route.ts) n'a pas été
+  touchée** : destinataire, 5000 caractères, honeypot, limite de débit, tout est identique.
+  Elle accepte encore les deux types, ce qui ne coûte rien.
+- Un « ← Retour » discret du formulaire vers le menu : sans lui, un clic à côté obligeait à
+  refermer et rouvrir.
+
+**Vérifié** — `tsc --noEmit`, `npm run test` (109), `npm run build` passent. Serveur de dev
+lancé : le bouton est bien dans le HTML de `/`, et l'URL du tableur dans le chunk
+`app__components_FeedbackButton_tsx`. **Victor a testé dans son navigateur et validé.**
+Non testé : l'envoi réel d'un email (il aurait expédié un vrai message).
+
+> **Rappel Resend**, inchangé mais toujours vrai : tant qu'aucun domaine n'est vérifié,
+> l'envoi n'aboutit **qu'à** l'adresse propriétaire du compte Resend. Un échec d'envoi n'est
+> donc pas forcément un bug du formulaire.
+
 ### 2026-08-17 (5) — URL de production en `gg-dashboard`, colonne conclusion élargie
 
 **Contexte** — l'URL Vercel portait encore `lol-dashboard`, et « Résumé / Conclusion » ne

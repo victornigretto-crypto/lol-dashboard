@@ -95,6 +95,12 @@ une fois le dépôt connecté** : son silence ne prouve rien, ne pas s'y fier.
 > comportement d'avant, avec un avertissement dans les logs.
 > **Ne jamais préfixer cette clé `NEXT_PUBLIC_`** : elle contourne RLS.
 
+> ### Le cockpit se rafraîchit sans F5 (2026-08-19)
+> Un bouton dans la bannière, et une synchronisation au retour d'onglet **bridée à une par
+> minute**. Pas de minuteur, pas de cron : l'activité de l'utilisateur seule déclenche.
+> Le bridage est obligatoire — `/api/riot/import` n'a aucune limite de débit, un import tout
+> en cache coûte 3 appels Riot fixes, et le quota de 100 req/2 min est partagé par TOUS.
+
 > ### Le puuid n'est pas une clé stable (2026-08-19)
 > Il est **chiffré par clé d'API** : changer la clé Riot invalide tous les puuid en base.
 > Ça a figé 4 cockpits pendant des jours, sans le moindre message, et laissé 84 games
@@ -170,6 +176,40 @@ même sans contenu écrit.
 ---
 
 ## Journal des sessions
+
+### 2026-08-19 (2) — Le cockpit se rafraîchit sans F5 : bouton + retour d'onglet
+
+**Contexte** — après une partie, rien n'apparaissait tant qu'on ne rechargeait pas la page.
+
+**Changé** — dans [/suivi](app/suivi/page.tsx) uniquement, rien côté serveur :
+- **Bouton « Mettre à jour le profil »** sous le rôle principal, dans la bannière. Même bleu
+  que l'appel à l'action de l'accueil, mais en `text-sm` : il accompagne l'identité du profil,
+  il ne pèse pas plus lourd que le Riot ID. Un rond porte l'état — **gris** au repos, **jaune**
+  pendant l'appel, **vert** une fois fini. Inactif pendant l'appel (`disabled` + `aria-busy`).
+- **Rafraîchissement au retour d'onglet** (`visibilitychange`). **Aucun minuteur, aucun cron
+  Vercel** : seule l'activité réelle de l'utilisateur déclenche un appel.
+- Les deux **réutilisent `reloadKey`**, le mécanisme qui sert déjà au changement de compte :
+  l'effet refait import -> relecture des games sans recharger la page. Pas de seconde copie de
+  cet enchaînement, qui aurait fini par diverger.
+- **Le rond ne passe au vert que si un CLIC attendait le résultat.** Une synchronisation
+  silencieuse le laisse gris : rien ne doit clignoter dans le dos de l'utilisateur.
+
+> ### Le délai de garde de 60 s n'est pas du confort
+> `/api/riot/import` **n'a aucune limite de débit** — elle est publique, et seul le `429` de
+> `riotFetch` la rattrape après coup. Un import **entièrement en cache coûte quand même 3
+> appels Riot** : `account-v1`, la liste des 20 matchs et `league-v4`, dont aucun n'est
+> cachable. Le quota mesuré est de **100 requêtes / 2 min, PARTAGÉ par tous les utilisateurs**,
+> soit ~33 rafraîchissements pour toute l'app. Sans garde-fou, un seul joueur qui change
+> d'onglet toutes les dix secondes en consomme un tiers, et le 429 arrive à trois joueurs.
+> Le déclenchement automatique est donc bridé à un par minute ; **le bouton manuel ne l'est
+> pas** — un clic est une intention explicite, et l'état inactif suffit à empêcher les rafales.
+
+**Vérifié** — `tsc --noEmit`, 133 tests, `npm run build`. Rendu des trois états du bouton
+produit à part (valeurs Tailwind exactes), faute de pouvoir capturer un écran authentifié.
+**Non vérifié en conditions réelles, et c'est tout le comportement** : le clic et la bascule
+des couleurs, la liste qui s'actualise sans rechargement, le `visibilitychange` et son délai
+de garde, l'alignement réel dans la bannière. `/suivi` exige une session.
+
 
 ### 2026-08-19 — Le puuid n'est pas une clé stable : 84 games orphelines réparées
 
@@ -260,37 +300,6 @@ n'a été déclenchée. **Non vérifié en conditions réelles** : `/suivi`, qui
 **Reste ouvert** — sur un compte comme Dickapryo, faut-il compter les champions tous rôles
 confondus, descendre le seuil de rôles à 3, ou inclure Flex et normales dans ces deux
 bandeaux ? Question posée, non tranchée.
-
-
-### 2026-08-17 (6) — Le signalement se scinde : les bugs sur un tableur, les idées par email
-
-**Contexte** — Victor veut que « Rapporter un bug » mène à un Google Sheet plutôt qu'à un
-champ de texte. Les suggestions, elles, ne changent pas.
-
-**Changé**
-- [FeedbackButton.tsx](app/_components/FeedbackButton.tsx) : la fenêtre s'ouvre désormais sur
-  un **menu à deux entrées** au lieu du formulaire coiffé de deux onglets. « Rapporter un
-  bug » est une **ancre** vers le tableur (`target="_blank"`, `rel="noopener noreferrer"`) ;
-  « Suggérer une amélioration » mène au champ de texte inchangé.
-- Une **ancre et non un `window.open`** : le clic du milieu, le « ouvrir dans un nouvel
-  onglet » et l'aperçu de l'URL en bas du navigateur n'existent que sur un `<a href>`.
-- **Nouvel onglet plutôt que navigation** : signaler un bug depuis `/suivi` ne doit pas faire
-  perdre le cockpit et la saisie en cours.
-- Le formulaire envoie maintenant toujours `type: "suggestion"` — le chemin « bug » ne passe
-  plus par l'API. **[app/api/feedback/route.ts](app/api/feedback/route.ts) n'a pas été
-  touchée** : destinataire, 5000 caractères, honeypot, limite de débit, tout est identique.
-  Elle accepte encore les deux types, ce qui ne coûte rien.
-- Un « ← Retour » discret du formulaire vers le menu : sans lui, un clic à côté obligeait à
-  refermer et rouvrir.
-
-**Vérifié** — `tsc --noEmit`, `npm run test` (109), `npm run build` passent. Serveur de dev
-lancé : le bouton est bien dans le HTML de `/`, et l'URL du tableur dans le chunk
-`app__components_FeedbackButton_tsx`. **Victor a testé dans son navigateur et validé.**
-Non testé : l'envoi réel d'un email (il aurait expédié un vrai message).
-
-> **Rappel Resend**, inchangé mais toujours vrai : tant qu'aucun domaine n'est vérifié,
-> l'envoi n'aboutit **qu'à** l'adresse propriétaire du compte Resend. Un échec d'envoi n'est
-> donc pas forcément un bug du formulaire.
 
 
 ---
@@ -452,6 +461,10 @@ Priorités posées par Victor : **fluidité** d'abord, et **tenir la montée en 
 
 - [ ] **Clé Riot de production.** Tant qu'on est en dev key, tout casse toutes les 24 h et
       la perf plafonne à ~4,5 s par recherche.
+- [ ] **Le rafraîchissement du cockpit n'a jamais été essayé dans un navigateur.** Bouton,
+      bascule gris/jaune/vert, liste qui s'actualise sans rechargement, `visibilitychange` et
+      son délai de 60 s : tout est du 2026-08-19 et **rien n'a été vu en vrai**. C'est le
+      premier écran à ouvrir à la prochaine session.
 - [ ] **`/api/riot/import` est publique et non rate-limitée**
       ([lib/supabase/proxy.ts:55](lib/supabase/proxy.ts#L55)). Nécessaire pour l'analyse
       gratuite, mais n'importe qui peut cramer le quota Riot.
