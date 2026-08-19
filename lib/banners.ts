@@ -17,7 +17,7 @@ import {
   type CsSource,
   type DeathsSource,
 } from "@/lib/stats";
-import { roleFromLane, type Role, type TierThresholds } from "@/lib/content";
+import { roleFromLane, type Role, type Tier, type TierThresholds } from "@/lib/content";
 
 // La sévérité d'un bandeau EST la bande de la stat qui l'a produit, moins le
 // cas "inconnu" (qui ne produit aucun bandeau : on ne dit rien plutôt que de
@@ -202,28 +202,76 @@ export function deathsBanner(games: BannerGame[], thresholds: TierThresholds | n
   };
 }
 
-// Un joueur qui touche à 4 rôles ou plus ne construit d'automatismes nulle
-// part. Seul bandeau du lot à ne PAS dépendre du palier : la règle est la même
-// pour tout le monde, donc il s'affiche aussi pour un compte non classé.
-export function rolesBanner(games: BannerGame[]): Banner | null {
-  const sample = soloqGames(games);
-  const played = new Set(
-    sample.map((g) => roleFromLane(g.lane)).filter((r): r is Role => r !== null)
-  );
-  if (played.size < 4) return null;
+// Éparpiller ses games est jugé à DEUX niveaux, revus le 2026-08-19 :
+//   3 rôles à 2 games ou plus  -> jaune, c'est une dérive qui s'installe ;
+//   3 rôles à 3 games ou plus  -> rouge, c'est installé.
+// Un rôle joué une seule fois ne compte dans aucun des deux : dépanner n'est
+// pas s'éparpiller. C'est ce qui distingue cette règle de la précédente, qui
+// comptait 4 rôles distincts sans regarder le nombre de parties.
+const MIN_ROLES = 3;
+const GAMES_ALERTE = 3;
+const GAMES_VIGILANCE = 2;
 
-  const named = ROLE_ORDER.filter((r) => played.has(r)).map((r) => ROLE_LABEL[r]);
+// Le conseil est le même dans les deux cas : c'est la sévérité qui change, pas
+// le remède.
+const CONSEIL_ROLES = "Il faut se concentrer sur 1 rôle pour progresser (max 2)";
+
+// À partir d'émeraude, ce bandeau ne s'affiche plus. Un joueur de ce niveau qui
+// touche à plusieurs rôles sait ce qu'il fait ; le lui reprocher n'apprend rien.
+// Demande de Victor du 2026-08-19.
+//
+// `unranked` n'en fait PAS partie : un compte sans palier connu reste averti,
+// c'est le public qui a le plus à y gagner.
+const TIERS_SANS_ALERTE_ROLES = new Set<Tier>([
+  "emerald",
+  "diamond",
+  "master",
+  "grandmaster",
+  "challenger",
+]);
+
+// Un joueur réparti sur trois rôles ne construit d'automatismes nulle part.
+export function rolesBanner(games: BannerGame[], tier: Tier): Banner | null {
+  if (TIERS_SANS_ALERTE_ROLES.has(tier)) return null;
+
+  const sample = soloqGames(games);
+
+  const parRole = new Map<Role, number>();
+  for (const game of sample) {
+    const role = roleFromLane(game.lane);
+    if (role === null) continue;
+    parRole.set(role, (parRole.get(role) ?? 0) + 1);
+  }
+
+  // Les deux seuils sont INCLUSIFS : « 2 parties ou plus », « 3 parties ou plus ».
+  const compte = (minimum: number) =>
+    ROLE_ORDER.filter((r) => (parRole.get(r) ?? 0) >= minimum);
+
+  const alerte = compte(GAMES_ALERTE);
+  const vigilance = compte(GAMES_VIGILANCE);
+
+  // Le rouge d'abord : trois rôles à 3 games remplissent aussi la condition du
+  // jaune, et c'est le verdict le plus fort qui doit sortir.
+  const retenus =
+    alerte.length >= MIN_ROLES ? alerte : vigilance.length >= MIN_ROLES ? vigilance : null;
+  if (retenus === null) return null;
+
+  const severity: Severity = alerte.length >= MIN_ROLES ? "bad" : "warn";
+  const named = retenus.map((r) => `${ROLE_LABEL[r]} (${parRole.get(r)})`);
+
   return {
     id: "roles",
-    severity: "bad",
+    severity,
     // En tête de liste quoi qu'il arrive. La raison a changé le 2026-08-17 :
     // les bandeaux de stats ne moyennent plus des lanes différentes, ils sont
     // filtrés sur le rôle principal. Mais éparpiller ses games reste le
     // problème numéro un — et c'est désormais AUSSI ce qui vide l'échantillon
     // analysé, puisque seules les parties du rôle principal y entrent.
     pinned: true,
-    text: "Tu joues trop de rôle !!!",
-    detail: `${played.size} rôles différents sur tes ${sample.length} dernières SoloQ (${named.join(", ")})`,
+    text: severity === "bad" ? "Tu joues trop de rôles !" : "Attention à ne pas jouer trop de rôles",
+    // Le conseil d'abord — c'est ce que Victor a demandé de lire au clic — puis
+    // les chiffres qui ont déclenché, sans quoi le verdict est invérifiable.
+    detail: `${CONSEIL_ROLES} — ${named.join(", ")} sur tes ${sample.length} dernières SoloQ`,
   };
 }
 
@@ -291,7 +339,8 @@ function roleGames(games: BannerGame[], role: Role | null): BannerGame[] {
 export function performanceBanners(
   games: BannerGame[],
   thresholds: TierThresholds | null,
-  role: Role | null
+  role: Role | null,
+  tier: Tier
 ): Banner[] {
   const stats = roleGames(games, role);
   return sortBanners(
@@ -299,7 +348,9 @@ export function performanceBanners(
       farmPre20Banner(stats, thresholds),
       farmPost20Banner(stats, thresholds),
       deathsBanner(stats, thresholds),
-      rolesBanner(games),
+      // Le seul à recevoir le palier plutôt que les seuils : sa règle ne dépend
+      // pas de chiffres de performance, mais de QUI on s'autorise à sermonner.
+      rolesBanner(games, tier),
       championPoolBanner(games, thresholds),
     ].filter((b): b is Banner => b !== null)
   );

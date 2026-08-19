@@ -179,40 +179,97 @@ describe("deathsBanner", () => {
 describe("rolesBanner", () => {
   const roles = ["Top", "Jungle", "Mid", "Bot", "Support"];
 
-  it("alerte a partir de 4 roles differents", () => {
-    const four = roles.slice(0, 4).map((lane) => game({ lane }));
-    expect(rolesBanner(four)?.severity).toBe("bad");
-    expect(rolesBanner(four)?.detail).toContain("4 rôles");
+  // Regle du 2026-08-19, a deux niveaux :
+  //   3 roles a 2 games ou plus -> jaune ;
+  //   3 roles a 3 games ou plus -> rouge.
+  // Un role joue une seule fois ne compte dans aucun des deux.
+  const nFois = (lane: string, n: number, over: Partial<BannerGame> = {}) =>
+    Array.from({ length: n }, () => game({ lane, ...over }));
+
+  const CONSEIL = "Il faut se concentrer sur 1 rôle pour progresser (max 2)";
+
+  it("passe au ROUGE a 3 roles de 3 games ou plus", () => {
+    const b = rolesBanner([...nFois("Mid", 3), ...nFois("Top", 3), ...nFois("Jungle", 3)], "silver");
+    expect(b?.severity).toBe("bad");
+    expect(b?.text).toBe("Tu joues trop de rôles !");
+    expect(b?.detail).toContain(CONSEIL);
+  });
+
+  it("passe au JAUNE a 3 roles de 2 games", () => {
+    const b = rolesBanner([...nFois("Mid", 2), ...nFois("Top", 2), ...nFois("Jungle", 2)], "silver");
+    expect(b?.severity).toBe("warn");
+    expect(b?.text).toBe("Attention à ne pas jouer trop de rôles");
+    expect(b?.detail).toContain(CONSEIL);
+  });
+
+  // Le rouge remplit aussi la condition du jaune : c'est le verdict le plus
+  // fort qui sort, jamais les deux.
+  it("ne rend que le rouge quand les deux conditions sont remplies", () => {
+    const games = [...nFois("Mid", 5), ...nFois("Top", 4), ...nFois("Jungle", 3)];
+    expect(rolesBanner(games, "silver")?.severity).toBe("bad");
+  });
+
+  // Repartition reelle de Dickapryo#EUW (bronze) : 14 Mid, 3 Top, 2 Bot. Il
+  // tombe dans le JAUNE, pas dans le rouge : il lui manque une game en Bot.
+  it("classe Dickapryo en jaune, et en rouge avec une game de plus", () => {
+    const games = [...nFois("Mid", 14), ...nFois("Top", 3), ...nFois("Bot", 2)];
+    expect(rolesBanner(games, "bronze")?.severity).toBe("warn");
+    expect(rolesBanner([...games, game({ lane: "Bot" })], "bronze")?.severity).toBe("bad");
+  });
+
+  // Depanner n'est pas s'eparpiller. L'ancienne regle (4 roles distincts, sans
+  // compter les parties) alertait pourtant ici.
+  it("ne dit rien sur quatre roles effleures une seule fois", () => {
+    const effleures = roles.slice(0, 4).map((lane) => game({ lane }));
+    expect(rolesBanner(effleures, "silver")).toBeNull();
+  });
+
+  it("ne dit rien sur deux roles, meme tres pratiques", () => {
+    expect(rolesBanner([...nFois("Mid", 10), ...nFois("Top", 10)], "silver")).toBeNull();
+  });
+
+  // Demande de Victor : a partir d'emeraude on ne sermonne plus personne. Un
+  // compte NON CLASSE, lui, reste averti.
+  it("se tait a partir d'emeraude, mais parle aux non classes", () => {
+    const games = [...nFois("Mid", 5), ...nFois("Top", 5), ...nFois("Jungle", 5)];
+    for (const t of ["emerald", "diamond", "master", "grandmaster", "challenger"] as const) {
+      expect(rolesBanner(games, t)).toBeNull();
+    }
+    for (const t of ["iron", "bronze", "silver", "gold", "platinum", "unranked"] as const) {
+      expect(rolesBanner(games, t)?.severity).toBe("bad");
+    }
   });
 
   // Demande de Victor : c'est le constat le plus important, il doit etre en
   // tete meme quand tous les autres bandeaux sont verts.
   it("remonte en tete de liste, devant les bandeaux verts", () => {
     const games = [
-      game({ lane: "Mid", cs20: 180 }),
-      game({ lane: "Top", cs20: 180 }),
-      game({ lane: "Jungle" }),
-      game({ lane: "Support" }),
+      ...nFois("Mid", 3, { cs20: 180 }),
+      ...nFois("Top", 3, { cs20: 180 }),
+      ...nFois("Jungle", 3),
     ];
-    expect(performanceBanners(games, PLATINUM, null)[0].id).toBe("roles");
-  });
-
-  it("ne dit rien en dessous de 4 roles", () => {
-    expect(rolesBanner(roles.slice(0, 3).map((lane) => game({ lane })))).toBeNull();
+    expect(performanceBanners(games, PLATINUM, null, "platinum")[0].id).toBe("roles");
   });
 
   // Ce bandeau se juge sur la SoloQ seule : c'est la file ou la specialisation
-  // compte.
+  // compte. Les 3 games par role sont indispensables ici, sinon le test
+  // passerait pour la mauvaise raison.
   it("ignore les games hors SoloQ", () => {
-    expect(rolesBanner(roles.map((lane) => game({ lane, queue: "Flex" })))).toBeNull();
-    expect(rolesBanner(roles.map((lane) => game({ lane, queue: null })))).toBeNull();
+    const troisRoles = (q: string | null) => [
+      ...nFois("Mid", 3, { queue: q }),
+      ...nFois("Top", 3, { queue: q }),
+      ...nFois("Jungle", 3, { queue: q }),
+    ];
+    expect(rolesBanner(troisRoles("Flex"), "silver")).toBeNull();
+    expect(rolesBanner(troisRoles(null), "silver")).toBeNull();
+    expect(rolesBanner(troisRoles("SoloQ"), "silver")?.severity).toBe("bad");
   });
 
-  // Seul bandeau du lot a ne pas dependre du palier : la regle est la meme
-  // pour tout le monde, donc il s'affiche aussi sans seuils.
+  // Seul bandeau du lot a ne pas dependre des SEUILS : il s'affiche donc aussi
+  // quand le palier n'en a pas.
   it("s'affiche meme sans seuils de palier", () => {
-    const games = roles.slice(0, 4).map((lane) => game({ lane }));
-    expect(performanceBanners(games, null, null).map((b) => b.id)).toEqual(["roles"]);
+    const games = [...nFois("Mid", 3), ...nFois("Top", 3), ...nFois("Jungle", 3)];
+    expect(performanceBanners(games, null, null, "unranked").map((b) => b.id)).toEqual(["roles"]);
   });
 });
 
@@ -260,14 +317,14 @@ describe("championPoolBanner", () => {
 
 describe("performanceBanners", () => {
   it("rend les bandeaux deja tries du meilleur au rouge, epingles mis a part", () => {
-    // Bon farm (vert fonce) + 4 roles (rouge, epingle) sur le meme echantillon.
+    // Bon farm (vert fonce) + 3 roles pratiques (rouge, epingle) sur le meme
+    // echantillon.
     const games = [
-      game({ lane: "Mid", cs20: 180 }),
-      game({ lane: "Top", cs20: 180 }),
-      game({ lane: "Jungle" }),
-      game({ lane: "Support" }),
+      ...Array.from({ length: 3 }, () => game({ lane: "Mid", cs20: 180 })),
+      ...Array.from({ length: 3 }, () => game({ lane: "Top", cs20: 180 })),
+      ...Array.from({ length: 3 }, () => game({ lane: "Jungle" })),
     ];
-    const banners = performanceBanners(games, PLATINUM, null);
+    const banners = performanceBanners(games, PLATINUM, null, "platinum");
     expect(banners.map((b) => b.severity)).toContain("great");
     expect(banners.map((b) => b.severity)).toContain("bad");
 
@@ -298,8 +355,8 @@ describe("performanceBanners", () => {
       ...Array.from({ length: 6 }, () => game({ lane: "Top", cs20: 20 })),
     ];
 
-    const farmMid = performanceBanners(games, PLATINUM, "mid").find((b) => b.id === "farm-pre20");
-    const farmTous = performanceBanners(games, PLATINUM, null).find((b) => b.id === "farm-pre20");
+    const farmMid = performanceBanners(games, PLATINUM, "mid", "platinum").find((b) => b.id === "farm-pre20");
+    const farmTous = performanceBanners(games, PLATINUM, null, "platinum").find((b) => b.id === "farm-pre20");
 
     // Filtre sur mid : le verdict reste au vert le plus haut.
     expect(farmMid?.severity).toBe("great");
@@ -313,15 +370,14 @@ describe("performanceBanners", () => {
   // pour designer le plus charge.
   it("laisse les bandeaux roles et champions voir tous les roles", () => {
     const games = [
-      game({ lane: "Mid" }),
-      game({ lane: "Top" }),
-      game({ lane: "Jungle" }),
-      game({ lane: "Support" }),
+      ...Array.from({ length: 3 }, () => game({ lane: "Mid" })),
+      ...Array.from({ length: 3 }, () => game({ lane: "Top" })),
+      ...Array.from({ length: 3 }, () => game({ lane: "Jungle" })),
     ];
 
     // Filtre sur mid : si "roles" etait filtre lui aussi, il ne verrait qu'un
     // seul role et ne pourrait plus jamais se declencher.
-    expect(performanceBanners(games, PLATINUM, "mid").map((b) => b.id)).toContain("roles");
+    expect(performanceBanners(games, PLATINUM, "mid", "platinum").map((b) => b.id)).toContain("roles");
   });
 
   // Un joueur dont l'echantillon ne contient aucune game du role principal :
@@ -333,14 +389,14 @@ describe("performanceBanners", () => {
     // prouve rien.
     const games = [game({ lane: "Top" }), game({ lane: "Top" })];
 
-    expect(performanceBanners(games, PLATINUM, null).map((b) => b.id)).toContain("farm-pre20");
+    expect(performanceBanners(games, PLATINUM, null, "platinum").map((b) => b.id)).toContain("farm-pre20");
 
-    const ids = performanceBanners(games, PLATINUM, "mid").map((b) => b.id);
+    const ids = performanceBanners(games, PLATINUM, "mid", "platinum").map((b) => b.id);
     expect(ids).not.toContain("farm-pre20");
     expect(ids).not.toContain("deaths");
   });
 
   it("ne rend aucun bandeau dependant du palier sans seuils", () => {
-    expect(performanceBanners([game()], null, null)).toEqual([]);
+    expect(performanceBanners([game()], null, null, "unranked")).toEqual([]);
   });
 });

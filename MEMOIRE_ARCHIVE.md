@@ -13,6 +13,53 @@
 
 ---
 
+### 2026-08-19 — Le puuid n'est pas une clé stable : 84 games orphelines réparées
+
+**Contexte** — un abonné ne voyait pas sa nouvelle partie malgré des F5 répétés ; seule une
+resynchronisation de profil la faisait apparaître.
+
+**La cause, établie sur données réelles** — **le puuid est chiffré par CLÉ D'API.** Changer la
+clé Riot invalide d'un coup tous les puuid stockés. Trois preuves convergentes :
+1. Renommage **réfuté** : interrogé par le puuid stocké, Riot rend `400`, pas `200` avec un
+   nouveau pseudo. *(Attention : un puuid aléatoire rend aussi 400 — ce code ne prouve rien
+   à lui seul, il ne sert qu'à écarter le renommage.)*
+2. Même joueur confirmé : **90 % d'historique commun** entre les deux identifiants.
+3. Séparation temporelle **parfaite, 10/10** : tout puuid dont la première écriture précède
+   l'installation de la clé (2026-08-18 10:57 UTC) est mort, tout puuid postérieur est vivant.
+
+> ### La panne était parfaitement silencieuse
+> `persist` devenait faux (plus rien n'était écrit) pendant que `/suivi` continuait de lire
+> les games avec **l'ancien** puuid. Le cockpit se figeait et **recharger n'y changeait rien**.
+> Le seul remède connu du joueur — resynchroniser — **efface** les games de l'ancien puuid :
+> il perdait son travail pour réparer un bug qu'il ne pouvait pas voir.
+
+**Changé**
+- **84 games ré-associées en base** (21 Chopin Opus 52, 20 kaliinto, 20 SilentBlade, 23 LOSERQ
+  ACCOUNT) + les 4 profils. **`UPDATE` seul, aucun `DELETE`**, sauvegarde prise avant. Les
+  **13 notes écrites à la main sont intactes**, dont les 8 de LOSERQ.
+  `match_facts` volontairement épargné : sa clé primaire est `(riot_match_id, puuid)` et 20
+  lignes existent déjà sous les deux identifiants — un `UPDATE` violerait la contrainte. C'est
+  un cache, il se réalimente seul.
+- **[/api/riot/import](app/api/riot/import/route.ts)** : quand le `riot_id` correspond mais que
+  le puuid diffère, la route ré-associe les games par `UPDATE` et rafraîchit le profil, au lieu
+  de renoncer en silence. Garde-fou `sameRiotId` (insensible à la casse et aux espaces).
+- **[/suivi](app/suivi/page.tsx)** : le `catch {}` muet devient un bandeau ambre en tête de
+  cockpit. Les games de la base restent affichées — le message les accompagne, il ne les
+  remplace pas.
+- Le `DELETE` de la resynchronisation **n'a pas été touché** : c'est un comportement voulu
+  (délier un compte doit effacer ses games), il n'était nuisible que comme rustine à ce bug.
+
+**Vérifié** — `tsc --noEmit`, **133 tests**, `npm run build`. **En base réelle** : les 84
+`UPDATE`, les 10 profils réalignés sur Riot, les 13 notes préservées.
+**Non vérifié en conditions réelles** : le filet de sécurité (plus rien à réparer, il ne
+s'exercera qu'au prochain changement de puuid) et le bandeau d'erreur (jamais affiché).
+
+> ### La clé actuelle est PERSONNELLE, elle n'expire pas
+> Empreinte `…70da`, posée le 2026-08-18 10:57 UTC, confirmée par Victor sur le portail.
+> Le risque n'est donc plus quotidien. Il reste réel : régénérer la clé, ou un transfert de
+> région, reproduirait la même panne — d'où le filet.
+> À savoir : cette clé rend les quotas d'une dev key (`X-App-Rate-Limit: 100:120,20:1`).
+
 ### 2026-08-18 — L'échantillon d'analyse change de règle : date, rôle, remakes
 
 **Contexte** — trois demandes de Victor sur ce qui entre dans les stats, plus le message

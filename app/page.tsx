@@ -353,6 +353,9 @@ export default function Home() {
     setTiltAlert(false);
 
     const thresholds = resolveThresholds(initial.rank);
+    // Le bandeau des rôles ne dépend pas des seuils mais du PALIER lui-même :
+    // il ne s'affiche plus à partir d'émeraude.
+    const tier = tierFromRiotTier(initial.rank?.tier);
 
     const onFail = (err: unknown) => {
       setAnalyzeError(err instanceof Error ? err.message : "Analyse impossible (réseau).");
@@ -370,7 +373,7 @@ export default function Home() {
       // Le rôle vient de l'échantillon analysé, pas de la totalité des games
       // rapatriées : c'est bien le rôle des parties qu'on juge.
       const role = dominantRole(sample.map((g) => g.lane));
-      const extra = performanceBanners(sample, thresholds, role);
+      const extra = performanceBanners(sample, thresholds, role, tier);
       if (extra.length > 0) setBanners((prev) => sortBanners([...prev, ...extra]));
       setTiltAlert(isTilted(sample));
     }, onFail);

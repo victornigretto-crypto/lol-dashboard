@@ -180,6 +180,40 @@ même sans contenu écrit.
 
 ## Journal des sessions
 
+### 2026-08-19 (4) — Le bandeau des rôles passe à deux niveaux et dépend du palier
+
+**Contexte** — la règle des 4 rôles distincts ratait le vrai éparpillement : un joueur réparti
+7/7/6 sur trois rôles ne disait rien, un mid main qui avait dépanné une fois au support était
+alerté.
+
+**Changé** — [lib/banners.ts](lib/banners.ts) :
+- Deux niveaux, sur les 20 dernières SoloQ : **3 rôles à 2 games ou plus → jaune**
+  « Attention à ne pas jouer trop de rôles » ; **3 rôles à 3 games ou plus → rouge**
+  « Tu joues trop de rôles ! ». Le rouge l'emporte quand les deux sont remplies.
+- Détail identique aux deux : « Il faut se concentrer sur 1 rôle pour progresser (max 2) »,
+  suivi des compteurs par rôle — sans eux le verdict serait invérifiable.
+- **Ce bandeau dépend désormais du PALIER** : muet à partir d'émeraude. Il a fallu faire
+  descendre le `tier` jusqu'à `performanceBanners`, les seuils ne suffisaient pas (platine et
+  émeraude partagent les mêmes). **Un compte non classé reste averti.**
+- Un rôle joué UNE fois ne compte plus nulle part : dépanner n'est pas s'éparpiller.
+- Le bandeau « trop de champions » n'a **pas** été touché, sur demande.
+
+**Vérifié** — `tsc --noEmit`, **145 tests**, `npm run build`. **Non vérifié en conditions
+réelles** : ni le jaune ni le rouge n'ont été vus dans un navigateur.
+
+> ### Fausse alerte sur LOSERQ ACCOUNT#panda, et la leçon qui compte
+> Signalé : « les dernières parties sont dans l'historique mais les bandeaux n'en tiennent pas
+> compte ». **Aucun bug** — vérifié en faisant tourner le vrai code sur ses données. Ses 20
+> dernières parties sont bien analysées, sa game la plus récente en tête.
+> Deux causes à son ressenti : sur les 26 parties qu'il voit, **9 ne comptent pas** (6 hors de
+> la fenêtre de 20, 3 hors rôle principal) ; et une moyenne sur 14 games bouge de 0,2 point
+> quand il joue à 8,8 — ses bonnes parties sont prises en compte, elles sont **noyées**.
+> **Piège de méthode, à ne pas répéter :** interroger `games` par `puuid` SEUL en service_role
+> contourne RLS et mélange les utilisateurs. **Deux comptes de l'app ont lié le même Riot ID**
+> (26 et 20 games), et mon premier calcul portait sur les deux. Toujours filtrer sur
+> `user_id` AUSSI. Contrôle fait : 0 doublon sur le couple (user, match).
+
+
 ### 2026-08-19 (3) — Les remakes réapparaissent dans l'historique, sans verdict ni chiffre
 
 **Contexte** — un remake d'1:09 s'affichait « Défaite » en rouge dans le cockpit, et restait
@@ -242,54 +276,6 @@ produit à part (valeurs Tailwind exactes), faute de pouvoir capturer un écran 
 **Non vérifié en conditions réelles, et c'est tout le comportement** : le clic et la bascule
 des couleurs, la liste qui s'actualise sans rechargement, le `visibilitychange` et son délai
 de garde, l'alignement réel dans la bannière. `/suivi` exige une session.
-
-
-### 2026-08-19 — Le puuid n'est pas une clé stable : 84 games orphelines réparées
-
-**Contexte** — un abonné ne voyait pas sa nouvelle partie malgré des F5 répétés ; seule une
-resynchronisation de profil la faisait apparaître.
-
-**La cause, établie sur données réelles** — **le puuid est chiffré par CLÉ D'API.** Changer la
-clé Riot invalide d'un coup tous les puuid stockés. Trois preuves convergentes :
-1. Renommage **réfuté** : interrogé par le puuid stocké, Riot rend `400`, pas `200` avec un
-   nouveau pseudo. *(Attention : un puuid aléatoire rend aussi 400 — ce code ne prouve rien
-   à lui seul, il ne sert qu'à écarter le renommage.)*
-2. Même joueur confirmé : **90 % d'historique commun** entre les deux identifiants.
-3. Séparation temporelle **parfaite, 10/10** : tout puuid dont la première écriture précède
-   l'installation de la clé (2026-08-18 10:57 UTC) est mort, tout puuid postérieur est vivant.
-
-> ### La panne était parfaitement silencieuse
-> `persist` devenait faux (plus rien n'était écrit) pendant que `/suivi` continuait de lire
-> les games avec **l'ancien** puuid. Le cockpit se figeait et **recharger n'y changeait rien**.
-> Le seul remède connu du joueur — resynchroniser — **efface** les games de l'ancien puuid :
-> il perdait son travail pour réparer un bug qu'il ne pouvait pas voir.
-
-**Changé**
-- **84 games ré-associées en base** (21 Chopin Opus 52, 20 kaliinto, 20 SilentBlade, 23 LOSERQ
-  ACCOUNT) + les 4 profils. **`UPDATE` seul, aucun `DELETE`**, sauvegarde prise avant. Les
-  **13 notes écrites à la main sont intactes**, dont les 8 de LOSERQ.
-  `match_facts` volontairement épargné : sa clé primaire est `(riot_match_id, puuid)` et 20
-  lignes existent déjà sous les deux identifiants — un `UPDATE` violerait la contrainte. C'est
-  un cache, il se réalimente seul.
-- **[/api/riot/import](app/api/riot/import/route.ts)** : quand le `riot_id` correspond mais que
-  le puuid diffère, la route ré-associe les games par `UPDATE` et rafraîchit le profil, au lieu
-  de renoncer en silence. Garde-fou `sameRiotId` (insensible à la casse et aux espaces).
-- **[/suivi](app/suivi/page.tsx)** : le `catch {}` muet devient un bandeau ambre en tête de
-  cockpit. Les games de la base restent affichées — le message les accompagne, il ne les
-  remplace pas.
-- Le `DELETE` de la resynchronisation **n'a pas été touché** : c'est un comportement voulu
-  (délier un compte doit effacer ses games), il n'était nuisible que comme rustine à ce bug.
-
-**Vérifié** — `tsc --noEmit`, **133 tests**, `npm run build`. **En base réelle** : les 84
-`UPDATE`, les 10 profils réalignés sur Riot, les 13 notes préservées.
-**Non vérifié en conditions réelles** : le filet de sécurité (plus rien à réparer, il ne
-s'exercera qu'au prochain changement de puuid) et le bandeau d'erreur (jamais affiché).
-
-> ### La clé actuelle est PERSONNELLE, elle n'expire pas
-> Empreinte `…70da`, posée le 2026-08-18 10:57 UTC, confirmée par Victor sur le portail.
-> Le risque n'est donc plus quotidien. Il reste réel : régénérer la clé, ou un transfert de
-> région, reproduirait la même panne — d'où le filet.
-> À savoir : cette clé rend les quotas d'une dev key (`X-App-Rate-Limit: 100:120,20:1`).
 
 
 ---
@@ -382,11 +368,15 @@ pas du code.
         Depuis la réécriture du 2026-08-17 il décrit en plus du contenu qui n'existe plus.
       - `secondary_role` — demandé au joueur à l'onboarding, écrit en base, jamais relu.
       - `wins` / `losses` — remontés par les deux routes API jusqu'au state React, jamais affichés.
-- [ ] **Seuils de « trop de rôles » et « trop de champions » à retrancher ?** Sur un compte
-      comme Dickapryo#EUW (bronze, 3 rôles, pool de 3), les deux se taisent alors que Victor
-      s'attendait à les voir. Trois leviers possibles, aucun tranché : compter les champions
-      tous rôles confondus (comme avant le 17/08), descendre le seuil de rôles de 4 à 3, ou
-      inclure Flex et normales — ces deux bandeaux ne regardent que la SoloQ.
+- [ ] **Rendre visible SUR QUOI porte l'analyse.** Un « Analyse sur tes 17 dernières parties
+      en Mid » en tête du panneau réglerait l'incompréhension de LOSERQ, qui voyait 26 parties
+      dont 9 ne comptaient pas. Une ligne de code, le meilleur rapport qualité/effort du lot.
+- [ ] **Seuils de « trop de champions » à revoir ?** Le comptage est PAR RÔLE et strictement
+      supérieur : iron/bronze 3, silver/gold 4, platine et au-dessus 5, non classé jamais.
+      Dickapryo a 7 champions sur 20 parties mais aucun rôle au-dessus de 3, d'où son silence.
+      Contrairement au bandeau des rôles, celui-ci ne s'éteint pas à émeraude.
+- [x] ~~**Seuils de « trop de rôles »**~~ — tranchés le 2026-08-19 : deux niveaux (3 rôles à
+      2 games → jaune, à 3 games → rouge) et plus rien à partir d'émeraude.
 - [x] ~~**Le message de clé expirée ne s'affiche pas sur `/suivi`**~~ — fait le 2026-08-19,
       bandeau ambre en tête de cockpit. **Jamais affiché en vrai** : la procédure de test
       (poser une fausse clé au format `RGAPI-` + UUID via l'écran d'administration, recharger,

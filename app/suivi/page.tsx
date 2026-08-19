@@ -11,6 +11,7 @@ import {
   roleFromLane,
   thresholdsOf,
   tierFromRiotTier,
+  type Tier,
   type TierContent,
   type TierThresholds,
 } from "@/lib/content";
@@ -110,6 +111,9 @@ export default function SuiviPage() {
   // Séparé de `content` : les seuils de couleur ne dépendent que du palier,
   // alors que le contenu pédagogique dépend du couple (rôle, palier).
   const [thresholds, setThresholds] = useState<TierThresholds | null>(null);
+  // Le palier lui-même, et pas seulement ses seuils : le bandeau des rôles ne
+  // s'affiche plus à partir d'émeraude, ce qu'aucun seuil ne permet de savoir.
+  const [tier, setTier] = useState<Tier>("unranked");
 
   // Changement de compte Riot. `reloadKey` relance l'effet de chargement au
   // lieu de dupliquer sa logique : il garde ainsi son propre garde-fou
@@ -200,6 +204,7 @@ export default function SuiviPage() {
       // Les couleurs, elles, s'appliquent dès que le palier est connu — même
       // pour un rôle dont le contenu pédagogique n'est pas encore écrit.
       setThresholds(thresholdsOf(tier));
+      setTier(tier);
 
       // Le cockpit ne montre QUE les games du compte Riot actuellement lié.
       // `user_id` seul ne suffit pas : relier un autre Riot ID écrase
@@ -377,7 +382,8 @@ export default function SuiviPage() {
   const banners = performanceBanners(
     sampleForAnalysis(games),
     thresholds,
-    roleFromLane(primaryRole)
+    roleFromLane(primaryRole),
+    tier
   );
 
   return (
