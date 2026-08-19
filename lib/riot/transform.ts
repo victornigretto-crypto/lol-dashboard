@@ -9,6 +9,24 @@ export function parseRiotId(raw: string): { gameName: string; tagLine: string } 
   return { gameName: trimmed.slice(0, hashIndex), tagLine: trimmed.slice(hashIndex + 1) };
 }
 
+// Deux Riot ID désignent-ils le même compte ? Riot est insensible à la casse
+// sur le pseudo comme sur le tag, et les deux chaînes comparées ici viennent de
+// sources différentes — l'une de la base, l'autre de ce que l'utilisateur a
+// tapé. Comparer brutalement ferait échouer « Chopin Opus 52#1849 » contre
+// « chopin opus 52#1849 ».
+//
+// Sert de garde-fou à la ré-association de puuid dans /api/riot/import : on ne
+// réécrit les games d'un compte que si le Riot ID demandé est bien le sien.
+export function sameRiotId(a: string | null | undefined, b: string | null | undefined): boolean {
+  const parsedA = typeof a === "string" ? parseRiotId(a) : null;
+  const parsedB = typeof b === "string" ? parseRiotId(b) : null;
+  if (!parsedA || !parsedB) return false;
+  return (
+    parsedA.gameName.trim().toLowerCase() === parsedB.gameName.trim().toLowerCase() &&
+    parsedA.tagLine.trim().toLowerCase() === parsedB.tagLine.trim().toLowerCase()
+  );
+}
+
 // On n'affiche jamais l'ARAM ni les autres modes annexes : uniquement les
 // files "vraie game" (Normal Draft, SoloQ, Flex).
 const QUEUE_NORMAL = 400;

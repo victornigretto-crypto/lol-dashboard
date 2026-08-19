@@ -95,6 +95,14 @@ une fois le dépôt connecté** : son silence ne prouve rien, ne pas s'y fier.
 > comportement d'avant, avec un avertissement dans les logs.
 > **Ne jamais préfixer cette clé `NEXT_PUBLIC_`** : elle contourne RLS.
 
+> ### Le puuid n'est pas une clé stable (2026-08-19)
+> Il est **chiffré par clé d'API** : changer la clé Riot invalide tous les puuid en base.
+> Ça a figé 4 cockpits pendant des jours, sans le moindre message, et laissé 84 games
+> orphelines. `/api/riot/import` sait désormais s'en remettre seul, par `UPDATE`.
+> La clé actuelle (`…70da`, 2026-08-18 10:57 UTC) est **personnelle et n'expire pas**, donc
+> le risque n'est plus quotidien — mais régénérer une clé le ferait revenir.
+> **Ne jamais traiter un puuid comme un identifiant durable ; le `riot_id` est l'ancre.**
+
 > ### Ce qui entre dans l'analyse, depuis le 2026-08-18
 > Une seule porte : `sampleForAnalysis` dans [lib/sample.ts](lib/sample.ts). **Les 20
 > dernières parties**, jamais avant le **18/01/2026**, et **rien de moins de 5 minutes** (les
@@ -162,6 +170,54 @@ même sans contenu écrit.
 ---
 
 ## Journal des sessions
+
+### 2026-08-19 — Le puuid n'est pas une clé stable : 84 games orphelines réparées
+
+**Contexte** — un abonné ne voyait pas sa nouvelle partie malgré des F5 répétés ; seule une
+resynchronisation de profil la faisait apparaître.
+
+**La cause, établie sur données réelles** — **le puuid est chiffré par CLÉ D'API.** Changer la
+clé Riot invalide d'un coup tous les puuid stockés. Trois preuves convergentes :
+1. Renommage **réfuté** : interrogé par le puuid stocké, Riot rend `400`, pas `200` avec un
+   nouveau pseudo. *(Attention : un puuid aléatoire rend aussi 400 — ce code ne prouve rien
+   à lui seul, il ne sert qu'à écarter le renommage.)*
+2. Même joueur confirmé : **90 % d'historique commun** entre les deux identifiants.
+3. Séparation temporelle **parfaite, 10/10** : tout puuid dont la première écriture précède
+   l'installation de la clé (2026-08-18 10:57 UTC) est mort, tout puuid postérieur est vivant.
+
+> ### La panne était parfaitement silencieuse
+> `persist` devenait faux (plus rien n'était écrit) pendant que `/suivi` continuait de lire
+> les games avec **l'ancien** puuid. Le cockpit se figeait et **recharger n'y changeait rien**.
+> Le seul remède connu du joueur — resynchroniser — **efface** les games de l'ancien puuid :
+> il perdait son travail pour réparer un bug qu'il ne pouvait pas voir.
+
+**Changé**
+- **84 games ré-associées en base** (21 Chopin Opus 52, 20 kaliinto, 20 SilentBlade, 23 LOSERQ
+  ACCOUNT) + les 4 profils. **`UPDATE` seul, aucun `DELETE`**, sauvegarde prise avant. Les
+  **13 notes écrites à la main sont intactes**, dont les 8 de LOSERQ.
+  `match_facts` volontairement épargné : sa clé primaire est `(riot_match_id, puuid)` et 20
+  lignes existent déjà sous les deux identifiants — un `UPDATE` violerait la contrainte. C'est
+  un cache, il se réalimente seul.
+- **[/api/riot/import](app/api/riot/import/route.ts)** : quand le `riot_id` correspond mais que
+  le puuid diffère, la route ré-associe les games par `UPDATE` et rafraîchit le profil, au lieu
+  de renoncer en silence. Garde-fou `sameRiotId` (insensible à la casse et aux espaces).
+- **[/suivi](app/suivi/page.tsx)** : le `catch {}` muet devient un bandeau ambre en tête de
+  cockpit. Les games de la base restent affichées — le message les accompagne, il ne les
+  remplace pas.
+- Le `DELETE` de la resynchronisation **n'a pas été touché** : c'est un comportement voulu
+  (délier un compte doit effacer ses games), il n'était nuisible que comme rustine à ce bug.
+
+**Vérifié** — `tsc --noEmit`, **133 tests**, `npm run build`. **En base réelle** : les 84
+`UPDATE`, les 10 profils réalignés sur Riot, les 13 notes préservées.
+**Non vérifié en conditions réelles** : le filet de sécurité (plus rien à réparer, il ne
+s'exercera qu'au prochain changement de puuid) et le bandeau d'erreur (jamais affiché).
+
+> ### La clé actuelle est PERSONNELLE, elle n'expire pas
+> Empreinte `…70da`, posée le 2026-08-18 10:57 UTC, confirmée par Victor sur le portail.
+> Le risque n'est donc plus quotidien. Il reste réel : régénérer la clé, ou un transfert de
+> région, reproduirait la même panne — d'où le filet.
+> À savoir : cette clé rend les quotas d'une dev key (`X-App-Rate-Limit: 100:120,20:1`).
+
 
 ### 2026-08-18 — L'échantillon d'analyse change de règle : date, rôle, remakes
 
@@ -235,57 +291,6 @@ Non testé : l'envoi réel d'un email (il aurait expédié un vrai message).
 > **Rappel Resend**, inchangé mais toujours vrai : tant qu'aucun domaine n'est vérifié,
 > l'envoi n'aboutit **qu'à** l'adresse propriétaire du compte Resend. Un échec d'envoi n'est
 > donc pas forcément un bug du formulaire.
-
-
-### 2026-08-17 (5) — URL de production en `gg-dashboard`, colonne conclusion élargie
-
-**Contexte** — l'URL Vercel portait encore `lol-dashboard`, et « Résumé / Conclusion » ne
-tenait pas dans sa colonne du cockpit.
-
-**Changé**
-- **Projet Vercel renommé `lol-dashboard` → `gg-dashboard`.** URL publique :
-  **https://gg-dashboard-lol.vercel.app**. `gg-dashboard.vercel.app` tout court est **pris
-  par un tiers** (HTTP 200, contenu étranger) — d'où le suffixe. Le renommage **ne suffit
-  pas** : Vercel ne réattribue les URLs auto-générées qu'au prochain déploiement, il a fallu
-  `vercel alias set` **puis** `vercel domains add`. Sans ce dernier, la protection du projet
-  (`ssoProtection: all_except_custom_domains`) renvoyait **302 vers le SSO Vercel** : seul un
-  domaine *enregistré sur le projet* est public.
-- Les deux anciennes URLs (`lol-dashboard-three`, `lol-dashboard-nigretto`) **supprimées** sur
-  demande explicite de Victor. Il ne reste qu'un alias.
-- `/suivi` : Matchup **230 → 210 px**, Résumé / Conclusion **155 → 175 px** (désormais la même
-  largeur que les 3 questions, le commentaire qui justifiait 155 était devenu faux). **Somme
-  des colonnes inchangée à 1212 px** — y toucher fait déborder le cockpit.
-
-**Vérifié** — `tsc --noEmit`, `npm run test` (109), `npm run build` (15 routes) passent.
-URL de prod : **HTTP 200**, `<title>GG Dashboard</title>`. Clé Riot en base testée en direct
-contre l'API : `league-v4` renvoie **Platinum I, 54 LP, 23V/23D** → le rang a de quoi se
-synchroniser. **Non vérifié en conditions réelles** : la largeur de la colonne dans un
-navigateur, et le rang réellement affiché dans le cockpit.
-
-> ### Pourquoi « la clé est à jour » et le rang ne revenait pas
-> Deux causes qui se cumulent, et aucune ne se voyait :
-> `cleRiot()` lit **la base d'abord**, `RIOT_API_KEY` seulement en secours — éditer
-> `.env.local` ne change donc **rien** tant qu'une clé traîne dans `app_settings`.
-> Et [app/api/riot/import/route.ts:217](app/api/riot/import/route.ts#L217) fait
-> `.catch(() => [])` sur le rang : un **401 devient « pas de rang »**, sans erreur nulle part.
-> Les games, elles, s'affichent depuis Supabase — d'où l'impression que tout marche sauf le
-> rank. **La clé restée dans `.env.local` est toujours l'ancienne, expirée** : inoffensive
-> aujourd'hui, piège le jour où la base sera vidée.
-
-**Reste ouvert** — les *Redirect URLs* de Supabase Auth **n'ont pas été touchées**, et
-`lol-dashboard-three.vercel.app` sert **encore** le site (voir « Reste à faire »).
-
-> ### Un alias supprimé revient au déploiement suivant
-> Supprimer un **alias** (`vercel alias remove`) ne supprime pas l'**enregistrement du
-> domaine sur le projet** : au déploiement de production suivant, Vercel ré-aliase tous les
-> domaines du projet et les URLs « supprimées » réapparaissent. C'est arrivé aux deux, une
-> heure après leur suppression. La vraie suppression se fait dans **Settings → Domains** du
-> projet ; le CLI n'expose rien pour ça (`vercel domains remove` ne gère que les domaines
-> d'équipe, et un sous-domaine `.vercel.app` n'en est pas un).
-> **Cas à part : `<projet>-<scope>.vercel.app`.** Vercel le réattribue à chaque déploiement
-> de production, quoi qu'on fasse. Une fois retiré des domaines du projet il retombe
-> simplement en **302 vers le SSO** — présent mais non public, et c'est le mieux qu'on
-> puisse obtenir. Inutile d'essayer de le supprimer, il reviendra.
 
 
 ---
@@ -383,9 +388,13 @@ pas du code.
       s'attendait à les voir. Trois leviers possibles, aucun tranché : compter les champions
       tous rôles confondus (comme avant le 17/08), descendre le seuil de rôles de 4 à 3, ou
       inclure Flex et normales — ces deux bandeaux ne regardent que la SoloQ.
-- [ ] **Le message de clé expirée ne s'affiche pas sur `/suivi`.** Le cockpit avale ses échecs
-      d'import (`try { … } catch {}`), donc clé morte = rang absent sans un mot. C'est
-      pourtant le seul écran où le message servirait vraiment.
+- [x] ~~**Le message de clé expirée ne s'affiche pas sur `/suivi`**~~ — fait le 2026-08-19,
+      bandeau ambre en tête de cockpit. **Jamais affiché en vrai** : la procédure de test
+      (poser une fausse clé au format `RGAPI-` + UUID via l'écran d'administration, recharger,
+      remettre la vraie ; attention au cache de 30 s) est à jouer par Victor à un moment creux.
+- [ ] **Le filet de ré-association de puuid n'a jamais été exercé.** Les 84 games ont été
+      réparées par des requêtes directes, pas par ce code. Il ne se déclenchera qu'au prochain
+      changement de puuid réel — donc à surveiller le jour où la clé Riot change.
 - [ ] **L'échec du rang est avalé en silence**
       ([app/api/riot/import/route.ts:217](app/api/riot/import/route.ts#L217)) : `.catch(() => [])`
       transforme un `401 Unknown apikey` en « pas de rang », sans un mot dans la réponse ni

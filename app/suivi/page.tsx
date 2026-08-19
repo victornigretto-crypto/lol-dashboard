@@ -114,6 +114,10 @@ export default function SuiviPage() {
   const [switchInput, setSwitchInput] = useState("");
   const [switching, setSwitching] = useState(false);
   const [switchError, setSwitchError] = useState<string | null>(null);
+  // Pourquoi la synchronisation Riot a échoué, s'il y a lieu. `null` = tout va
+  // bien. Le cockpit reste affiché dans tous les cas : ce message accompagne
+  // les données de la base, il ne les remplace pas.
+  const [erreurImport, setErreurImport] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
 
   const gamesRef = useRef<Game[]>([]);
@@ -147,6 +151,7 @@ export default function SuiviPage() {
       // besoin pour cibler les couleurs. L'échec n'est pas bloquant : le
       // cockpit s'affiche avec ce qui est déjà en base, sans couleurs.
       let currentRank: Rank = null;
+      let echecImport: string | null = null;
       if (profile?.riot_id) {
         try {
           const res = await fetch("/api/riot/import", {
@@ -154,13 +159,25 @@ export default function SuiviPage() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ riotId: profile.riot_id, filter: "soloq" }),
           });
-          if (res.ok) currentRank = ((await res.json()).rank ?? null) as Rank;
+          if (res.ok) {
+            currentRank = ((await res.json()).rank ?? null) as Rank;
+          } else {
+            // Cet échec était AVALÉ en silence jusqu'au 2026-08-19, et ça a
+            // coûté cher : quand les puuid se sont invalidés, le cockpit s'est
+            // figé pendant des jours sans que personne ne puisse voir pourquoi.
+            // Une clé Riot expirée produit exactement le même silence.
+            // On ne bloque toujours pas l'affichage — les games en base restent
+            // lisibles — mais on dit ce qui n'a pas marché.
+            const corps = await res.json().catch(() => null);
+            echecImport = corps?.error ?? "La synchronisation avec Riot a échoué.";
+          }
         } catch {
-          // hors ligne / API Riot indisponible : on continue sur le cache.
+          echecImport = "Riot est injoignable. Les parties affichées viennent de la base.";
         }
       }
       if (!active) return;
       setRank(currentRank);
+      setErreurImport(echecImport);
 
       // Le palier de référence est le rang SoloQ courant ; à défaut (non
       // classé), l'ancien rang saisi à l'onboarding.
@@ -449,6 +466,24 @@ export default function SuiviPage() {
             </div>
           </div>
         </header>
+
+        {/* Synchronisation Riot en échec. En haut, avant tout le reste : ce qui
+            suit peut être périmé, et le joueur doit le savoir AVANT de lire ses
+            chiffres. Ambre et non rouge — rien n'est cassé, les données de la
+            base sont justes, elles datent seulement. */}
+        {erreurImport && (
+          <div
+            role="status"
+            className="mb-6 rounded-2xl border border-amber-500/50 bg-amber-500/10 p-4 text-sm text-amber-100"
+          >
+            <p className="font-semibold">Synchronisation avec Riot impossible</p>
+            <p className="mt-1 text-amber-200/90">{erreurImport}</p>
+            <p className="mt-1 text-amber-200/70">
+              Les parties ci-dessous viennent de la base : elles restent justes, mais tes
+              dernières games peuvent manquer.
+            </p>
+          </div>
+        )}
 
         {/* Le bloc reste visible même sans contenu écrit : on préfère dire
             franchement qu'il n'existe pas encore plutôt que de le faire

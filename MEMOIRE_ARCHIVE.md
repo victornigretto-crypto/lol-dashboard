@@ -13,6 +13,56 @@
 
 ---
 
+### 2026-08-17 (5) — URL de production en `gg-dashboard`, colonne conclusion élargie
+
+**Contexte** — l'URL Vercel portait encore `lol-dashboard`, et « Résumé / Conclusion » ne
+tenait pas dans sa colonne du cockpit.
+
+**Changé**
+- **Projet Vercel renommé `lol-dashboard` → `gg-dashboard`.** URL publique :
+  **https://gg-dashboard-lol.vercel.app**. `gg-dashboard.vercel.app` tout court est **pris
+  par un tiers** (HTTP 200, contenu étranger) — d'où le suffixe. Le renommage **ne suffit
+  pas** : Vercel ne réattribue les URLs auto-générées qu'au prochain déploiement, il a fallu
+  `vercel alias set` **puis** `vercel domains add`. Sans ce dernier, la protection du projet
+  (`ssoProtection: all_except_custom_domains`) renvoyait **302 vers le SSO Vercel** : seul un
+  domaine *enregistré sur le projet* est public.
+- Les deux anciennes URLs (`lol-dashboard-three`, `lol-dashboard-nigretto`) **supprimées** sur
+  demande explicite de Victor. Il ne reste qu'un alias.
+- `/suivi` : Matchup **230 → 210 px**, Résumé / Conclusion **155 → 175 px** (désormais la même
+  largeur que les 3 questions, le commentaire qui justifiait 155 était devenu faux). **Somme
+  des colonnes inchangée à 1212 px** — y toucher fait déborder le cockpit.
+
+**Vérifié** — `tsc --noEmit`, `npm run test` (109), `npm run build` (15 routes) passent.
+URL de prod : **HTTP 200**, `<title>GG Dashboard</title>`. Clé Riot en base testée en direct
+contre l'API : `league-v4` renvoie **Platinum I, 54 LP, 23V/23D** → le rang a de quoi se
+synchroniser. **Non vérifié en conditions réelles** : la largeur de la colonne dans un
+navigateur, et le rang réellement affiché dans le cockpit.
+
+> ### Pourquoi « la clé est à jour » et le rang ne revenait pas
+> Deux causes qui se cumulent, et aucune ne se voyait :
+> `cleRiot()` lit **la base d'abord**, `RIOT_API_KEY` seulement en secours — éditer
+> `.env.local` ne change donc **rien** tant qu'une clé traîne dans `app_settings`.
+> Et [app/api/riot/import/route.ts:217](app/api/riot/import/route.ts#L217) fait
+> `.catch(() => [])` sur le rang : un **401 devient « pas de rang »**, sans erreur nulle part.
+> Les games, elles, s'affichent depuis Supabase — d'où l'impression que tout marche sauf le
+> rank. **La clé restée dans `.env.local` est toujours l'ancienne, expirée** : inoffensive
+> aujourd'hui, piège le jour où la base sera vidée.
+
+**Reste ouvert** — les *Redirect URLs* de Supabase Auth **n'ont pas été touchées**, et
+`lol-dashboard-three.vercel.app` sert **encore** le site (voir « Reste à faire »).
+
+> ### Un alias supprimé revient au déploiement suivant
+> Supprimer un **alias** (`vercel alias remove`) ne supprime pas l'**enregistrement du
+> domaine sur le projet** : au déploiement de production suivant, Vercel ré-aliase tous les
+> domaines du projet et les URLs « supprimées » réapparaissent. C'est arrivé aux deux, une
+> heure après leur suppression. La vraie suppression se fait dans **Settings → Domains** du
+> projet ; le CLI n'expose rien pour ça (`vercel domains remove` ne gère que les domaines
+> d'équipe, et un sous-domaine `.vercel.app` n'en est pas un).
+> **Cas à part : `<projet>-<scope>.vercel.app`.** Vercel le réattribue à chaque déploiement
+> de production, quoi qu'on fasse. Une fois retiré des domaines du projet il retombe
+> simplement en **302 vers le SSO** — présent mais non public, et c'est le mieux qu'on
+> puisse obtenir. Inutile d'essayer de le supprimer, il reviendra.
+
 ### 2026-08-17 (3) — Bouton « Rapporter un problème » sur tous les écrans
 
 **Contexte** — Victor veut recevoir les retours des joueurs par email.

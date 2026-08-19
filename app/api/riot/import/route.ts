@@ -17,6 +17,7 @@ import {
   laneLabel,
   parseRiotId,
   queueLabel,
+  sameRiotId,
   totalCs,
   QUEUE_SOLOQ,
 } from "@/lib/riot/transform";
@@ -206,10 +207,55 @@ export async function POST(request: Request) {
       if (!user) return false;
       const { data: profile } = await supabase
         .from("profiles")
-        .select("puuid")
+        .select("puuid, riot_id")
         .eq("user_id", user.id)
         .maybeSingle();
-      return profile?.puuid === account.puuid;
+      if (!profile) return false;
+      if (profile.puuid === account.puuid) return true;
+
+      // Le puuid stocké ne correspond plus à celui que Riot renvoie AUJOURD'HUI
+      // pour ce même Riot ID. C'est arrivé en vrai le 2026-08-18 : un puuid est
+      // chiffré par CLÉ D'API, donc changer la clé Riot invalide d'un coup tous
+      // ceux qui sont en base.
+      //
+      // Sans ce rattrapage, la panne est parfaite : `persist` restait faux, donc
+      // plus rien ne s'écrivait, pendant que /suivi continuait de lire les games
+      // avec l'ancien puuid. Le cockpit se figeait, et RECHARGER N'Y CHANGEAIT
+      // RIEN — 84 games de 4 comptes se sont retrouvées orphelines, dont 13 avec
+      // des notes écrites à la main. Le seul remède était de resynchroniser son
+      // profil, ce qui EFFACE les games de l'ancien puuid : le joueur perdait
+      // son travail pour réparer un bug qu'il ne pouvait pas voir.
+      //
+      // On ré-associe donc, au lieu de laisser tomber. UPDATE et jamais DELETE :
+      // les trois listes d'erreurs et le résumé voyagent avec la ligne.
+      if (!sameRiotId(profile.riot_id, body?.riotId)) return false;
+
+      const { error: erreurGames } = await supabase
+        .from("games")
+        .update({ puuid: account.puuid })
+        .eq("user_id", user.id)
+        .eq("puuid", profile.puuid);
+      if (erreurGames) {
+        console.error("[import] ré-association des games impossible :", erreurGames.message);
+        return false;
+      }
+
+      const { error: erreurProfil } = await supabase
+        .from("profiles")
+        .update({ puuid: account.puuid })
+        .eq("user_id", user.id);
+      if (erreurProfil) {
+        // Les games portent déjà le nouveau puuid : laisser le profil sur
+        // l'ancien les rendrait invisibles. On le dit fort et on n'écrit pas
+        // davantage, la prochaine tentative rejouera le même rattrapage.
+        console.error("[import] mise à jour du puuid du profil impossible :", erreurProfil.message);
+        return false;
+      }
+
+      console.warn(
+        `[import] puuid ré-associé pour ${profile.riot_id} : ${profile.puuid} -> ${account.puuid}`
+      );
+      return true;
     })();
 
     const [rows, rankEntries] = await Promise.all([

@@ -9,6 +9,7 @@ import {
   isAllowedQueue,
   parseRiotId,
   queueLabel,
+  sameRiotId,
 } from "@/lib/riot/transform";
 
 describe("parseRiotId", () => {
@@ -158,5 +159,39 @@ describe("deathsInLastMinutes", () => {
 
   it("accepte une duree donnee en millisecondes", () => {
     expect(deathsInLastMinutes(kills, 1, 2_100_000, 5)).toBe(2);
+  });
+});
+
+// Garde-fou de la re-association de puuid : on ne reecrit les games d'un compte
+// que si le Riot ID demande est bien le sien. Une comparaison trop stricte
+// bloquerait la reparation, une comparaison trop laxiste reecrirait les games
+// du mauvais compte.
+describe("sameRiotId", () => {
+  it("reconnait le meme compte quelle que soit la casse", () => {
+    expect(sameRiotId("Chopin Opus 52#1849", "chopin opus 52#1849")).toBe(true);
+    expect(sameRiotId("LOSERQ ACCOUNT#panda", "loserq account#PANDA")).toBe(true);
+  });
+
+  it("tolere les espaces autour", () => {
+    expect(sameRiotId("  yaston94#EUW  ", "yaston94#euw")).toBe(true);
+  });
+
+  it("refuse deux comptes differents", () => {
+    expect(sameRiotId("Chopin Opus 52#1849", "Chopin Opus 47#Op47")).toBe(false);
+    // Meme pseudo, tag different : ce sont bien deux comptes distincts.
+    expect(sameRiotId("kaliinto#EUW", "kaliinto#EUW2")).toBe(false);
+  });
+
+  it("refuse tout ce qui n'est pas un Riot ID exploitable", () => {
+    expect(sameRiotId(null, "yaston94#EUW")).toBe(false);
+    expect(sameRiotId("yaston94#EUW", undefined)).toBe(false);
+    expect(sameRiotId("", "")).toBe(false);
+    expect(sameRiotId("sansdiese", "sansdiese")).toBe(false);
+    expect(sameRiotId("#EUW", "#EUW")).toBe(false);
+    expect(sameRiotId("yaston94#", "yaston94#")).toBe(false);
+  });
+
+  it("garde le dernier # comme separateur, comme parseRiotId", () => {
+    expect(sameRiotId("a#b#TAG", "A#B#tag")).toBe(true);
   });
 });
