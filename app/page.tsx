@@ -16,7 +16,7 @@ import {
 } from "@/lib/content";
 import { championIconUrl, useDdragonVersion } from "@/lib/ddragon";
 import { rememberRiotId } from "@/lib/pendingRiotId";
-import { EARLIEST_GAME_ISO, sampleForAnalysis } from "@/lib/sample";
+import { EARLIEST_GAME_ISO, estRemake, sampleForAnalysis, sampleForDisplay } from "@/lib/sample";
 import { rankEmblemUrl, rankLabel } from "@/lib/riot/rank";
 import { formatDuration, formatGameDate, parseRiotId } from "@/lib/riot/transform";
 import { AnalysisPanel } from "./_components/AnalysisPanel";
@@ -175,6 +175,10 @@ function GameRow({
   ddragonVersion: string | null;
 }) {
   const win = game.result.toLowerCase().startsWith("v");
+  // Une partie de moins de 5 minutes n'a pas eu lieu : ni victoire, ni défaite.
+  // Le verdict de Riot est bien "Défaite", mais l'afficher ferait porter au
+  // joueur un résultat que l'analyse, elle, ne compte pas.
+  const remake = estRemake(game);
   const icon = championIconUrl(ddragonVersion, game.champion);
   const opponentIcon = championIconUrl(ddragonVersion, game.matchup);
 
@@ -182,7 +186,7 @@ function GameRow({
     <div
       className={
         "flex items-center gap-3 rounded-xl border-l-4 bg-slate-900/80 px-4 py-3 " +
-        (win ? "border-green-500" : "border-red-500")
+        (remake ? "border-slate-600" : win ? "border-green-500" : "border-red-500")
       }
     >
       <p className="w-12 shrink-0 text-center text-[11px] text-slate-500">{formatGameDate(game.played_at)}</p>
@@ -220,8 +224,13 @@ function GameRow({
         </p>
       </div>
 
-      <p className={"w-16 text-center text-sm font-semibold " + (win ? "text-green-400" : "text-red-400")}>
-        {win ? "Victoire" : "Défaite"}
+      <p
+        className={
+          "w-16 text-center text-sm font-semibold " +
+          (remake ? "text-slate-400" : win ? "text-green-400" : "text-red-400")
+        }
+      >
+        {remake ? "Remake" : win ? "Victoire" : "Défaite"}
       </p>
       <StatCells game={game} thresholds={thresholds} content={content} hideOnMobile />
     </div>
@@ -373,6 +382,14 @@ export default function Home() {
   // Les parties affichées sont EXACTEMENT celles qui servent à l'analyse : plus
   // de repli « plus de 2 mois », plus de game masquée dont dépendrait un
   // bandeau. Ce que le joueur voit est ce qui a été jugé.
+  // DEUX listes, et il ne faut pas les confondre :
+  //   - `displayedGames` : les 20 dernières parties, REMAKES COMPRIS. Un remake
+  //     occupe une place dans l'historique, on veut le voir.
+  //   - `analysedGames`  : les 20 dernières VRAIES parties. Un remake n'y prend
+  //     aucune place, donc l'analyse va chercher un peu plus loin en arrière.
+  // Conséquence assumée : les deux listes ne se recouvrent pas exactement dès
+  // qu'il y a un remake dans la fenêtre.
+  const displayedGames = sampleForDisplay(games);
   const analysedGames = sampleForAnalysis(games);
   const content = resolveContent(analysedGames, rank);
   const thresholds = resolveThresholds(rank);
@@ -548,13 +565,13 @@ export default function Home() {
                   <p className="text-center text-slate-400">Aucune game trouvée pour ce filtre.</p>
                 ) : (
                   <>
-                    {analysedGames.map((game) => (
+                    {displayedGames.map((game) => (
                       <GameRow key={game.riot_match_id} game={game} thresholds={thresholds} content={content} ddragonVersion={ddragonVersion} />
                     ))}
                     {/* Le filtre a bien ramené des parties, mais toutes sont
                         antérieures au plancher. Le dire, plutôt que de laisser
                         une liste vide sans explication. */}
-                    {analysedGames.length === 0 && (
+                    {displayedGames.length === 0 && (
                       <p className="text-center text-slate-400">
                         Aucune partie depuis le {PLANCHER_LISIBLE} pour ce filtre.
                       </p>

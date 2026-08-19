@@ -3,7 +3,9 @@ import {
   EARLIEST_GAME_ISO,
   MIN_DURATION_SECONDS,
   SAMPLE_SIZE,
+  estRemake,
   sampleForAnalysis,
+  sampleForDisplay,
 } from "./sample";
 
 // Une game réduite à ce que la sélection regarde : sa date et sa durée. La
@@ -122,5 +124,68 @@ describe("sampleForAnalysis", () => {
 
   it("rend une liste vide sans broncher", () => {
     expect(sampleForAnalysis([])).toEqual([]);
+  });
+});
+
+describe("estRemake", () => {
+  it("reconnaît une partie de moins de cinq minutes", () => {
+    expect(estRemake({ game_duration_seconds: MIN_DURATION_SECONDS - 1 })).toBe(true);
+    expect(estRemake({ game_duration_seconds: 69 })).toBe(true);
+  });
+
+  it("ne compte pas une partie de cinq minutes pile", () => {
+    expect(estRemake({ game_duration_seconds: MIN_DURATION_SECONDS })).toBe(false);
+  });
+
+  // Le piège : 88 lignes en base n'ont jamais eu de durée. Les marquer
+  // « Remake » réécrirait leur histoire, alors qu'on ne sait simplement pas.
+  it("ne prend PAS une durée inconnue pour un remake", () => {
+    expect(estRemake({ game_duration_seconds: null })).toBe(false);
+  });
+});
+
+describe("sampleForDisplay", () => {
+  it("garde les remakes, contrairement à l'analyse", () => {
+    const games = [
+      game(apresPlancher(3), "remake", 69),
+      game(apresPlancher(2), "vraie"),
+    ];
+
+    expect(sampleForDisplay(games).map((g) => g.id)).toEqual(["remake", "vraie"]);
+    expect(sampleForAnalysis(games).map((g) => g.id)).toEqual(["vraie"]);
+  });
+
+  // Décision de Victor : la liste affichée est celle des 20 DERNIÈRES parties,
+  // remakes compris. Un remake y occupe donc une place, alors qu'il n'en occupe
+  // aucune dans l'échantillon analysé.
+  it("laisse un remake occuper une place de l'historique", () => {
+    const remakes = Array.from({ length: 3 }, (_, i) =>
+      game(apresPlancher(100 + i), `remake-${i}`, 120)
+    );
+    const vraies = Array.from({ length: SAMPLE_SIZE }, (_, i) =>
+      game(apresPlancher(i + 1), `vraie-${i}`)
+    );
+    const tout = [...remakes, ...vraies];
+
+    const affichees = sampleForDisplay(tout);
+    expect(affichees).toHaveLength(SAMPLE_SIZE);
+    // Les 3 remakes sont les plus récents : ils prennent les 3 premières places.
+    expect(affichees.slice(0, 3).every((g) => g.id.startsWith("remake"))).toBe(true);
+
+    // L'analyse, elle, ignore les remakes et va chercher 20 vraies parties —
+    // donc plus loin en arrière que ce qui est affiché.
+    const analysees = sampleForAnalysis(tout);
+    expect(analysees).toHaveLength(SAMPLE_SIZE);
+    expect(analysees.every((g) => g.id.startsWith("vraie"))).toBe(true);
+  });
+
+  it("applique le même plancher que l'analyse", () => {
+    const avant = new Date(Date.parse(EARLIEST_GAME_ISO) - 86_400_000).toISOString();
+    // Un remake antérieur au plancher ne doit pas réapparaître par la bande.
+    expect(sampleForDisplay([game(avant, "vieux-remake", 60)])).toEqual([]);
+  });
+
+  it("écarte les parties sans date, comme l'analyse", () => {
+    expect(sampleForDisplay([game(null, "sans-date")])).toEqual([]);
   });
 });

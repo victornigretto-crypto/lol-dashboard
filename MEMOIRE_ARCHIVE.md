@@ -13,6 +13,48 @@
 
 ---
 
+### 2026-08-18 — L'échantillon d'analyse change de règle : date, rôle, remakes
+
+**Contexte** — trois demandes de Victor sur ce qui entre dans les stats, plus le message
+d'erreur de la clé Riot.
+
+**Changé**
+- **[lib/sample.ts](lib/sample.ts), nouveau** : le point de passage UNIQUE de tout ce qui est
+  analysé. La règle « moins de 2 mois » est **supprimée** — elle jugeait un joueur peu actif
+  sur deux parties. Désormais : **les 20 dernières, plancher dur au 18/01/2026**, et les
+  parties de **moins de 5 minutes écartées** (remakes). Les remakes sont retirés AVANT le
+  découpage à 20 : ils ne consomment aucune place.
+- **Filtre par rôle principal** dans `performanceBanners` : farm avant/après 20 et morts ne
+  jugent que les parties du rôle principal. **« Trop de rôles » et le pool de champions
+  restent sur tout l'échantillon** — le premier compte justement les rôles, le second a besoin
+  des autres rôles pour désigner le plus chargé.
+- **`/`** : le repli « plus de 2 mois » disparaît, la liste affiche exactement ce qui est
+  analysé. **`/suivi`** : bandeaux sur l'échantillon, **mais le tableau garde toutes les
+  games** — il porte les notes écrites à la main.
+- **[lib/riot/client.ts](lib/riot/client.ts)** : un 401/403 de Riot rend désormais
+  « Expiration de la clef API : Contacter Gros Galio pour lui demander de la refresh » au lieu
+  du JSON brut. Le détail technique part dans les logs serveur.
+- **[app/login/page.tsx](app/login/page.tsx)** : la flèche `←` du bouton « Continuer sans se
+  connecter » (haut à gauche, hors de la carte) est retirée. Un caractère ; la pilule, sa
+  bordure et sa position ne bougent pas.
+
+**Vérifié** — `tsc --noEmit`, **128 tests** (15 nouveaux), `npm run build`. Le chemin d'erreur
+401/403 est couvert par des tests qui simulent les réponses de Riot ; aucune vraie expiration
+n'a été déclenchée. **Non vérifié en conditions réelles** : `/suivi`, qui exige une session.
+
+> ### Deux diagnostics faits sur données réelles, pas au raisonnement
+> **Dickapryo#EUW** — Victor pensait que le filtre par rôle avait tué « trop de rôles » et
+> « trop de champions ». Preuve du contraire : `performanceBanners(role=null)`, donc SANS
+> filtre, rend exactement la même liste. Ils sont muets par leurs propres seuils — 3 rôles
+> (il en faut 4) et pool de 3 en bronze (il en faut plus de 3).
+> **Chopin Opus 47#Op47** — le « Peux mieux side lane » à 6,2 CS/min est juste : son farm
+> avant 20 est bon partout, mais il prend 59 CS en 17 minutes sur une game de 37 min. Les
+> games de moins de 20 minutes rendent `null` et ne pèsent pas sur cette moyenne.
+
+**Reste ouvert** — sur un compte comme Dickapryo, faut-il compter les champions tous rôles
+confondus, descendre le seuil de rôles à 3, ou inclure Flex et normales dans ces deux
+bandeaux ? Question posée, non tranchée.
+
 ### 2026-08-17 (6) — Le signalement se scinde : les bugs sur un tableur, les idées par email
 
 **Contexte** — Victor veut que « Rapporter un bug » mène à un Google Sheet plutôt qu'à un

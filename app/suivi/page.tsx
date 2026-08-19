@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { performanceBanners } from "@/lib/banners";
-import { sampleForAnalysis } from "@/lib/sample";
+import { estRemake, sampleForAnalysis } from "@/lib/sample";
 import {
   FALLBACK_CONTENT,
   getContent,
@@ -624,6 +624,8 @@ export default function SuiviPage() {
 // une grille de <div>.
 
 const CELL = "border border-slate-700 align-top";
+// Cellule chiffrée d'un remake : gris ardoise, aucun verdict.
+const VIDE_REMAKE = "bg-slate-800 text-slate-500";
 const HEAD = "border border-slate-700 bg-slate-800 px-2 py-2 text-left text-xs font-semibold text-slate-300";
 
 // Zone de saisie qui grandit avec son contenu : `rows={1}` puis la hauteur est
@@ -804,6 +806,10 @@ function GameRow({
   onSummaryChange: (id: string, value: string) => void;
 }) {
   const win = game.result.toLowerCase().startsWith("v");
+  // Partie de moins de 5 minutes : elle reste dans l'historique — c'est le
+  // cahier du joueur — mais elle n'affiche ni verdict ni chiffre, puisque
+  // aucune analyse ne la compte.
+  const remake = estRemake(game);
   const icon = championIconUrl(ddragonVersion, game.champion);
   const opponentIcon = championIconUrl(ddragonVersion, game.matchup);
 
@@ -870,49 +876,73 @@ function GameRow({
         </p>
       </td>
 
-      <td className={CELL + stat + "font-semibold " + (win ? "bg-green-600 text-white" : "bg-red-600 text-white")}>
-        {win ? "Victoire" : "Défaite"}
-      </td>
-
       <td
         className={
           CELL +
           stat +
-          csClass(perMinPre20, thresholds?.csPre20 ?? null) +
-          alertClass(content, "csPre20", bandPre20)
+          "font-semibold " +
+          (remake
+            ? "bg-slate-800 text-slate-400"
+            : win
+              ? "bg-green-600 text-white"
+              : "bg-red-600 text-white")
         }
       >
-        {perMinPre20 ?? "—"}
+        {remake ? "Remake" : win ? "Victoire" : "Défaite"}
       </td>
 
-      <td
-        className={
-          CELL +
-          stat +
-          csClass(perMinPost20, thresholds?.csPost20 ?? null) +
-          alertClass(content, "csPost20", bandPost20)
-        }
-      >
-        {perMinPost20 ?? "—"}
-      </td>
+      {/* Un remake ne rend aucun chiffre : gris ardoise, pas de verdict de
+          couleur, pas de clignotement, pas de pointillé. Afficher « 1.7 CS/min »
+          sur une partie d'une minute contredisait « elle ne compte pas ». */}
+      {remake ? (
+        <>
+          <td className={CELL + stat + VIDE_REMAKE}>—</td>
+          <td className={CELL + stat + VIDE_REMAKE}>—</td>
+          <td className={CELL + stat + VIDE_REMAKE}>—</td>
+        </>
+      ) : (
+        <>
+          <td
+            className={
+              CELL +
+              stat +
+              csClass(perMinPre20, thresholds?.csPre20 ?? null) +
+              alertClass(content, "csPre20", bandPre20)
+            }
+          >
+            {perMinPre20 ?? "—"}
+          </td>
 
-      <td
-        className={
-          CELL +
-          stat +
-          deathsClass(deathsForColour, thresholds?.deaths10 ?? null) +
-          alertClass(content, "deaths10", bandDeaths)
-        }
-      >
-        {/* Le chiffre affiché reste le rythme BRUT ; seule la couleur suit le
-            rythme pondéré. Le pointillé signale cet écart. */}
-        <span
-          className={explained ? "cursor-help underline decoration-dotted underline-offset-2" : undefined}
-          title={explained ? DEATHS_EXPLANATION : undefined}
-        >
-          {game.deaths10}
-        </span>
-      </td>
+          <td
+            className={
+              CELL +
+              stat +
+              csClass(perMinPost20, thresholds?.csPost20 ?? null) +
+              alertClass(content, "csPost20", bandPost20)
+            }
+          >
+            {perMinPost20 ?? "—"}
+          </td>
+
+          <td
+            className={
+              CELL +
+              stat +
+              deathsClass(deathsForColour, thresholds?.deaths10 ?? null) +
+              alertClass(content, "deaths10", bandDeaths)
+            }
+          >
+            {/* Le chiffre affiché reste le rythme BRUT ; seule la couleur suit le
+                rythme pondéré. Le pointillé signale cet écart. */}
+            <span
+              className={explained ? "cursor-help underline decoration-dotted underline-offset-2" : undefined}
+              title={explained ? DEATHS_EXPLANATION : undefined}
+            >
+              {game.deaths10}
+            </span>
+          </td>
+        </>
+      )}
 
       {/* Pas de clignotement ici : la priorité du palier est portée par
           l'en-tête de colonne, une fois pour toutes. */}

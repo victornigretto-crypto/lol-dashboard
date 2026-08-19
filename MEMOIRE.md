@@ -114,6 +114,9 @@ une fois le dépôt connecté** : son silence ne prouve rien, ne pas s'y fier.
 > dernières parties**, jamais avant le **18/01/2026**, et **rien de moins de 5 minutes** (les
 > remakes sont retirés avant le découpage, ils ne prennent aucune place). La règle « moins de
 > 2 mois » n'existe plus.
+> **Deux listes depuis le 2026-08-19** : `sampleForDisplay` affiche les 20 dernières parties
+> **remakes compris** (verdict « Remake » en gris, cases chiffrées vides) ; `sampleForAnalysis`
+> ne retient que les 20 dernières **vraies** parties. Elles ne se recouvrent pas exactement.
 > Les bandeaux de **stats** (farm avant/après 20, morts) ne jugent que le **rôle principal**.
 > « Trop de rôles » et le pool de champions voient **tout l'échantillon**, et seulement la
 > SoloQ.
@@ -176,6 +179,36 @@ même sans contenu écrit.
 ---
 
 ## Journal des sessions
+
+### 2026-08-19 (3) — Les remakes réapparaissent dans l'historique, sans verdict ni chiffre
+
+**Contexte** — un remake d'1:09 s'affichait « Défaite » en rouge dans le cockpit, et restait
+invisible sur l'analyse publique. Deux comportements contradictoires pour la même partie.
+
+**Changé** — affichage uniquement, **rien en base** : le mot « Remake » se déduit de la durée
+à la lecture. Le projet stocke des faits bruts, jamais des calculs — et ça évite une migration.
+- **`estRemake` dans [lib/sample.ts](lib/sample.ts)**, à côté du seuil qu'il utilise déjà : une
+  seule définition pour l'analyse et pour l'affichage.
+- **Une durée INCONNUE n'est pas un remake.** 88 lignes en base n'ont jamais eu de durée ; les
+  marquer « Remake » réécrirait leur histoire. Un test le verrouille.
+- Verdict « Remake » en **gris ardoise** sur les deux pages, et les trois cases chiffrées
+  vidées (`—`, sans couleur, sans clignotement, sans pointillé). Afficher « 1.7 CS/min » sur
+  une partie d'une minute disait le contraire de « elle ne compte pas ».
+
+> ### Deux listes désormais, et il ne faut pas les confondre
+> `sampleForDisplay` rend les **20 dernières parties, REMAKES COMPRIS** — un remake occupe une
+> place dans l'historique, on veut le voir. `sampleForAnalysis` rend les 20 dernières **vraies**
+> parties — un remake n'y prend aucune place, donc l'analyse va chercher plus loin en arrière.
+> **Conséquence assumée** : dès qu'il y a un remake dans la fenêtre, les deux listes ne se
+> recouvrent pas exactement, et une partie analysée peut ne pas être affichée. C'est la
+> traduction de « c'est comme une partie qui n'a pas eu lieu ».
+> Sur `/`, l'affichage et l'analyse étaient la MÊME liste jusqu'ici : c'est ce couplage qu'il a
+> fallu défaire, pas l'étiquette.
+
+**Vérifié** — `tsc --noEmit`, **140 tests** (7 nouveaux), `npm run build`. **Testé par Victor
+dans son navigateur** : le remake s'affiche en gris des deux côtés, sans chiffres, et les
+bandeaux n'ont pas bougé.
+
 
 ### 2026-08-19 (2) — Le cockpit se rafraîchit sans F5 : bouton + retour d'onglet
 
@@ -257,49 +290,6 @@ s'exercera qu'au prochain changement de puuid) et le bandeau d'erreur (jamais af
 > Le risque n'est donc plus quotidien. Il reste réel : régénérer la clé, ou un transfert de
 > région, reproduirait la même panne — d'où le filet.
 > À savoir : cette clé rend les quotas d'une dev key (`X-App-Rate-Limit: 100:120,20:1`).
-
-
-### 2026-08-18 — L'échantillon d'analyse change de règle : date, rôle, remakes
-
-**Contexte** — trois demandes de Victor sur ce qui entre dans les stats, plus le message
-d'erreur de la clé Riot.
-
-**Changé**
-- **[lib/sample.ts](lib/sample.ts), nouveau** : le point de passage UNIQUE de tout ce qui est
-  analysé. La règle « moins de 2 mois » est **supprimée** — elle jugeait un joueur peu actif
-  sur deux parties. Désormais : **les 20 dernières, plancher dur au 18/01/2026**, et les
-  parties de **moins de 5 minutes écartées** (remakes). Les remakes sont retirés AVANT le
-  découpage à 20 : ils ne consomment aucune place.
-- **Filtre par rôle principal** dans `performanceBanners` : farm avant/après 20 et morts ne
-  jugent que les parties du rôle principal. **« Trop de rôles » et le pool de champions
-  restent sur tout l'échantillon** — le premier compte justement les rôles, le second a besoin
-  des autres rôles pour désigner le plus chargé.
-- **`/`** : le repli « plus de 2 mois » disparaît, la liste affiche exactement ce qui est
-  analysé. **`/suivi`** : bandeaux sur l'échantillon, **mais le tableau garde toutes les
-  games** — il porte les notes écrites à la main.
-- **[lib/riot/client.ts](lib/riot/client.ts)** : un 401/403 de Riot rend désormais
-  « Expiration de la clef API : Contacter Gros Galio pour lui demander de la refresh » au lieu
-  du JSON brut. Le détail technique part dans les logs serveur.
-- **[app/login/page.tsx](app/login/page.tsx)** : la flèche `←` du bouton « Continuer sans se
-  connecter » (haut à gauche, hors de la carte) est retirée. Un caractère ; la pilule, sa
-  bordure et sa position ne bougent pas.
-
-**Vérifié** — `tsc --noEmit`, **128 tests** (15 nouveaux), `npm run build`. Le chemin d'erreur
-401/403 est couvert par des tests qui simulent les réponses de Riot ; aucune vraie expiration
-n'a été déclenchée. **Non vérifié en conditions réelles** : `/suivi`, qui exige une session.
-
-> ### Deux diagnostics faits sur données réelles, pas au raisonnement
-> **Dickapryo#EUW** — Victor pensait que le filtre par rôle avait tué « trop de rôles » et
-> « trop de champions ». Preuve du contraire : `performanceBanners(role=null)`, donc SANS
-> filtre, rend exactement la même liste. Ils sont muets par leurs propres seuils — 3 rôles
-> (il en faut 4) et pool de 3 en bronze (il en faut plus de 3).
-> **Chopin Opus 47#Op47** — le « Peux mieux side lane » à 6,2 CS/min est juste : son farm
-> avant 20 est bon partout, mais il prend 59 CS en 17 minutes sur une game de 37 min. Les
-> games de moins de 20 minutes rendent `null` et ne pèsent pas sur cette moyenne.
-
-**Reste ouvert** — sur un compte comme Dickapryo, faut-il compter les champions tous rôles
-confondus, descendre le seuil de rôles à 3, ou inclure Flex et normales dans ces deux
-bandeaux ? Question posée, non tranchée.
 
 
 ---
@@ -461,10 +451,10 @@ Priorités posées par Victor : **fluidité** d'abord, et **tenir la montée en 
 
 - [ ] **Clé Riot de production.** Tant qu'on est en dev key, tout casse toutes les 24 h et
       la perf plafonne à ~4,5 s par recherche.
-- [ ] **Le rafraîchissement du cockpit n'a jamais été essayé dans un navigateur.** Bouton,
-      bascule gris/jaune/vert, liste qui s'actualise sans rechargement, `visibilitychange` et
-      son délai de 60 s : tout est du 2026-08-19 et **rien n'a été vu en vrai**. C'est le
-      premier écran à ouvrir à la prochaine session.
+- [x] ~~**Le rafraîchissement du cockpit n'a jamais été essayé dans un navigateur**~~ —
+      **testé et validé par Victor le 2026-08-19** : bouton, bascule gris/jaune/vert et
+      actualisation sans rechargement. Le `visibilitychange` et son délai de 60 s n'ont pas
+      été éprouvés séparément.
 - [ ] **`/api/riot/import` est publique et non rate-limitée**
       ([lib/supabase/proxy.ts:55](lib/supabase/proxy.ts#L55)). Nécessaire pour l'analyse
       gratuite, mais n'importe qui peut cramer le quota Riot.

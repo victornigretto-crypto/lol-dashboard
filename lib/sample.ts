@@ -26,10 +26,27 @@ const EARLIEST_MS = Date.parse(EARLIEST_GAME_ISO);
 // La borne est stricte : « moins de 5 minutes » exclut 4:59 et garde 5:00.
 export const MIN_DURATION_SECONDS = 300;
 
-type Analysable = {
-  played_at: string | null;
-  game_duration_seconds: number | null;
-};
+type Dure = { game_duration_seconds: number | null };
+
+type Analysable = Dure & { played_at: string | null };
+
+/**
+ * Une partie trop courte pour avoir eu lieu : remake ou déconnexion.
+ *
+ * Sert à DEUX choses qui ne doivent jamais diverger : écarter la partie de
+ * toutes les statistiques, et l'afficher « Remake » plutôt que victoire ou
+ * défaite. D'où sa place ici, à côté du seuil, plutôt qu'une comparaison
+ * recopiée dans chaque ligne de tableau.
+ *
+ * Une durée INCONNUE n'est pas un remake : on ne sait pas, et 88 lignes en base
+ * n'ont jamais eu de durée. Les marquer « Remake » réécrirait leur histoire.
+ * `sampleForAnalysis` les écarte quand même de l'analyse, mais pour une autre
+ * raison — on ne juge pas ce qu'on ne sait pas mesurer.
+ */
+export function estRemake(game: Dure): boolean {
+  const duree = game.game_duration_seconds;
+  return duree !== null && duree < MIN_DURATION_SECONDS;
+}
 
 /**
  * Les parties retenues pour l'analyse : les `SAMPLE_SIZE` plus récentes, jamais
@@ -62,4 +79,24 @@ export function sampleForAnalysis<T extends Analysable>(games: T[]): T[] {
       .sort((a, b) => Date.parse(b.played_at) - Date.parse(a.played_at))
       .slice(0, SAMPLE_SIZE)
   );
+}
+
+/**
+ * Les parties à AFFICHER dans l'historique : les `SAMPLE_SIZE` plus récentes au
+ * dessus du plancher, **remakes compris**.
+ *
+ * Elle diffère volontairement de `sampleForAnalysis` : un remake occupe une
+ * place dans l'historique — on veut le voir — mais aucune dans les moyennes.
+ * Conséquence assumée, décidée avec Victor le 2026-08-19 : quand la fenêtre
+ * affichée contient des remakes, l'analyse va chercher quelques parties plus
+ * anciennes pour réunir ses 20 vraies games. Les deux listes ne se recouvrent
+ * donc pas exactement.
+ */
+export function sampleForDisplay<T extends Analysable>(games: T[]): T[] {
+  return games
+    .filter((g): g is T & { played_at: string } => {
+      return g.played_at !== null && Date.parse(g.played_at) >= EARLIEST_MS;
+    })
+    .sort((a, b) => Date.parse(b.played_at) - Date.parse(a.played_at))
+    .slice(0, SAMPLE_SIZE);
 }

@@ -21,8 +21,13 @@ import {
   type DeathsSource,
 } from "@/lib/stats";
 import type { TierContent, TierThresholds } from "@/lib/content";
+import { estRemake } from "@/lib/sample";
 
 const CELL = "w-20 rounded px-1 py-0.5 text-center text-sm";
+
+// Gris ardoise, sans couleur de verdict ni clignotement : un remake n'a rien
+// produit qu'on puisse juger.
+const CELL_REMAKE = CELL + " bg-slate-800 text-slate-500";
 
 export function StatCells({
   game,
@@ -30,7 +35,7 @@ export function StatCells({
   content,
   hideOnMobile = false,
 }: {
-  game: CsSource & DeathsSource;
+  game: CsSource & DeathsSource & { game_duration_seconds: number | null };
   thresholds: TierThresholds | null;
   content: TierContent;
   // Sur / les cases disparaissent en dessous de `sm` faute de place ; sur
@@ -39,6 +44,23 @@ export function StatCells({
 }) {
   const { perMinPre20, perMinPost20 } = csMetrics(game);
   const base = (hideOnMobile ? "hidden sm:block " : "") + CELL + " ";
+
+  // Un remake ne rend AUCUN chiffre. Afficher « 1.7 CS/min » sur une partie
+  // d'une minute, colorée qui plus est, dirait exactement le contraire de
+  // « cette partie ne compte pas » — et c'est ce que le cockpit faisait.
+  if (estRemake(game)) {
+    const vide = (hideOnMobile ? "hidden sm:block " : "") + CELL_REMAKE + " ";
+    return (
+      <>
+        {["CS/min à 20min", "CS/min après 20min", "Morts/10m"].map((intitule) => (
+          <div key={intitule} className={vide}>
+            <p className="text-[10px] leading-tight opacity-80">{intitule}</p>
+            <p>—</p>
+          </div>
+        ))}
+      </>
+    );
+  }
 
   // Le compteur affiché reste le rythme brut ; seule la COULEUR suit le
   // rythme pondéré (morts de fin de partie comptées à moitié).
